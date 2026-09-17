@@ -1,6 +1,7 @@
 # Implementation Plan — AI Video Enhancer
 
-> Status: **Draft v2 for review** (matches design.md v2) · 2026-09-17 · Companion: [design.md](design.md)
+> Status: **In execution** — M0+M1 ✅ (`9e8c151`) · M2 ✅ (`b164e51`, `3bb5b05`, `ce217c3`) · next: M3 upscale stage
+> v2 approved by user 2026-09-17 ("execute plan") · Companion: [design.md](design.md)
 > Delivery model: incremental milestones M0–M7. Each milestone ends with something runnable you can try and react to. Estimates are agent-assisted development effort, not calendar time.
 
 ---
@@ -130,6 +131,7 @@
 | GPL (Spandrel) vs. MIT app code | License contamination | Subprocess isolation for custom-model import (design §8); shipped models use our own loaders/adapters |
 | Scope creep toward TAS feature parity (depth maps, AE plugin…) | Schedule slip | v1 scope frozen at design §1; those features explicitly deferred to v2+ |
 
-## Immediate next steps after your approval
-1. You confirm the two minor open questions in [design.md §10](design.md) (default anime SR model; app license choice).
-2. I start M0 + M1 immediately and show you the first runnable pipeline at each milestone.
+## Progress log
+- **M0+M1 ✅** — scaffold, FFmpeg I/O, scene detection, checkpointing, TRT backend (TRT 11 API), model registry + downloader.
+- **M2 ✅ (2026-09-17)** — RIFE 4.25 / heavy / lite variants on TensorRT fp16 with PyTorch-CUDA fallback; scene-cut protection verified pixel-exact at both cut boundaries for 24→60 and 30→120 runs (474 frames @120fps, zero morphing); de-duplication option; benchmark table in [benchmarks.md](benchmarks.md) (TRT ≈ PyTorch — RIFE is memory-bandwidth bound on the 5090). Experimental FI models registered with metadata + license notes: M2M, GMFSS, FILM, AMT-SICDIA (adapters pending).
+- **Next: M3 upscale stage** — anime SR lineup (ShuffleCugan x2 default) + Real-ESRGAN live-action; full-frame fp16 at 32 GB with tiling safety valve; first full-pipeline demo (dedup → interpolate → upscale).
