@@ -72,24 +72,81 @@ def _enable_fp16(config, network, trt) -> None:
                 continue
 
 
+def _free_vram_nvidia_smi() -> int | None:
+    """Free VRAM per nvidia-smi (MiB->bytes), or None when unavailable.
+
+    cudaMemGetInfo is blind to memory other processes hold via CUDA VMM
+    (cuMemMap — e.g. llama.cpp's allocator): it can report tens of GiB free
+    while the physical device is nearly full, and engine builds then OOM on
+    tiny commits. nvidia-smi sees the true physical usage.
+    """
+    import shutil
+    import subprocess
+
+    exe = shutil.which("nvidia-smi")
+    if exe is None:
+        return None
+    try:
+        out = subprocess.run(
+            [exe, "--query-gpu=memory.free", "--format=csv,noheader,nounits"],
+            capture_output=True, text=True, timeout=10,
+        )
+        if out.returncode != 0:
+            return None
+        first = out.stdout.strip().splitlines()[0].strip()
+        return int(first) * (1 << 20)
+    except Exception:  # pragma: no cover - nvidia-smi quirks
+        return None
+
+
+def free_vram_bytes() -> int:
+    """Conservative estimate of free GPU VRAM in bytes.
+
+    Takes the MINIMUM of cudaMemGetInfo and nvidia-smi (when available) so VMM-
+    mapped usage by other processes is accounted for. 0 when CUDA unavailable.
+    """
+    try:
+        import torch
+
+        if not torch.cuda.is_available():
+            return 0
+        free, _total = torch.cuda.mem_get_info()
+        best = int(free)
+    except Exception:  # pragma: no cover - non-CUDA environments
+        return 0
+    smi_free = _free_vram_nvidia_smi()
+    if smi_free is not None:
+        best = min(best, smi_free)
+    return best
+
+
 def build_engine(
     onnx_path: str | Path,
     engine_out: str | Path,
     precision: str = "fp16",
+    workspace_bytes: int | None = None,
 ) -> Path:
     """Build a serialized TensorRT engine from an ONNX file.
 
     If FP16 is requested but the build fails (unsupported op, etc.), retries
     once with default precision so a usable engine always results.
+
+    ``workspace_bytes=None`` adapts to current free VRAM: up to 4 GiB, but no
+    more than half of what is actually free — a fixed 4 GiB pool makes the
+    build OOM when other processes (e.g. an LLM server) hold most of the GPU.
     """
     trt = _trt()
     logger = trt.Logger(trt.Logger.WARNING)
     builder = trt.Builder(logger)
     data = Path(onnx_path).read_bytes()
 
+    if workspace_bytes is None:
+        free = free_vram_bytes()
+        workspace_bytes = int(min(4 << 30, max(512 << 20, (free // 2) if free else 4 << 30)))
+
     def _build_once(prec: str) -> tuple[bytes, float]:
         config = builder.create_builder_config()
-        config.set_memory_pool_limit(trt.MemoryPoolType.WORKSPACE, 4 << 30)
+        config.set_memory_pool_limit(trt.MemoryPoolType.WORKSPACE, workspace_bytes)
         network = _create_network(builder, trt)
         parser = trt.OnnxParser(network, logger)
         if not parser.parse(data):

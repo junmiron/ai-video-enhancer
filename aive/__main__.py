@@ -6,6 +6,7 @@ Usage:
   python -m aive pipeline <in> <out> [--no-scene-split] [--codec X] [--crf N]
                             [--container mp4|mkv] [--keep-workspace]
                             [--fi] [--target-fps F] [--fi-multiplier N] [--dedup-threshold T]
+                            [--sr] [--sr-model NAME] [--scale N]
   python -m aive download-model <name>
 """
 from __future__ import annotations
@@ -41,6 +42,9 @@ def main(argv: list[str] | None = None) -> int:
     p_pipe.add_argument("--target-fps", type=float, default=None, help="output fps; wins over --fi-multiplier")
     p_pipe.add_argument("--fi-multiplier", type=int, default=None, help="fps multiplier when --target-fps is unset (default x2)")
     p_pipe.add_argument("--dedup-threshold", type=float, default=None, help="de-duplication mean-abs-diff threshold in [0,1]; 0 disables")
+    p_pipe.add_argument("--sr", action="store_true", help="enable AI upscaling (M3)")
+    p_pipe.add_argument("--sr-model", default=None, help="SR registry name (shufflecugan_x2 | realesrgan_x4plus)")
+    p_pipe.add_argument("--scale", type=int, default=None, help="target output scale; default = model's native scale")
 
     p_dl = sub.add_parser("download-model", help="download a model from the registry")
     p_dl.add_argument("name")
@@ -85,6 +89,12 @@ def main(argv: list[str] | None = None) -> int:
             cfg.fi_multiplier = args.fi_multiplier
         if args.dedup_threshold is not None:
             cfg.fi_dedup_threshold = args.dedup_threshold
+        if args.sr or settings.sr_enabled:
+            cfg.sr_enabled = True
+        if args.sr_model:
+            cfg.sr_model = args.sr_model
+        if args.scale is not None:
+            cfg.sr_scale = args.scale
 
         def _emit(ev):
             d = ev.to_dict()

@@ -1,6 +1,6 @@
 # Implementation Plan — AI Video Enhancer
 
-> Status: **In execution** — M0+M1 ✅ (`9e8c151`) · M2 ✅ (`b164e51`, `3bb5b05`, `ce217c3`) · next: M3 upscale stage
+> Status: **In execution** — M0+M1 ✅ (`9e8c151`) · M2 ✅ (`b164e51`, `3bb5b05`, `ce217c3`) · M3 ✅ (core) · next: M4 artifact QA stage
 > v2 approved by user 2026-09-17 ("execute plan") · Companion: [design.md](design.md)
 > Delivery model: incremental milestones M0–M7. Each milestone ends with something runnable you can try and react to. Estimates are agent-assisted development effort, not calendar time.
 
@@ -134,4 +134,5 @@
 ## Progress log
 - **M0+M1 ✅** — scaffold, FFmpeg I/O, scene detection, checkpointing, TRT backend (TRT 11 API), model registry + downloader.
 - **M2 ✅ (2026-09-17)** — RIFE 4.25 / heavy / lite variants on TensorRT fp16 with PyTorch-CUDA fallback; scene-cut protection verified pixel-exact at both cut boundaries for 24→60 and 30→120 runs (474 frames @120fps, zero morphing); de-duplication option; benchmark table in [benchmarks.md](benchmarks.md) (TRT ≈ PyTorch — RIFE is memory-bandwidth bound on the 5090). Experimental FI models registered with metadata + license notes: M2M, GMFSS, FILM, AMT-SICDIA (adapters pending).
-- **Next: M3 upscale stage** — anime SR lineup (ShuffleCugan x2 default) + Real-ESRGAN live-action; full-frame fp16 at 32 GB with tiling safety valve; first full-pipeline demo (dedup → interpolate → upscale).
+- **M3 ✅ core (2026-09-17)** — Upscale stage shipped: ShuffleCUGAN x2 (anime default, UpCunet2x_fast vendored arch) + Real-ESRGAN x4plus (live-action, RRDBNet vendored from BasicSR); both on TensorRT fp16 with PyTorch-CUDA fallback; full-frame inference by default at 32 GB with automatic tiled mode (overlap + feathered blending, partition-of-unity verified) as VRAM safety valve. E2E demo: 1080p→4K HEVC main10 pipeline run clean; tile-boundary visual check seam-free. Robustness fixes found during GPU validation: edge-floor wiring for tiled blend (zero-weight frame edges), pad-to-engine overshoot, mask upscaling to output res, TRT build headroom guard + nvidia-smi-aware free-VRAM estimate (cudaMemGetInfo is blind to VMM-mapped usage by other processes). Remaining M3 scope (deferred as M3.x): Fallin Soft/Strong, SPAN, Cyte V1, OpenProteus adapters — each is a vendored arch module + manifest entry on the same runner; benchmark table in `docs/benchmarks.md`.
+- **Next: M4 artifact QA stage ⭐** — detectors (flicker, ghosting, banding, halo/ringing, line-art drift, color drift, regression frames) + hybrid CV/AI repairs + report export.

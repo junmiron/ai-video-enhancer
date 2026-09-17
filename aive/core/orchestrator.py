@@ -56,6 +56,11 @@ class PipelineConfig:
     fi_multiplier: int | None = None  # used when target fps is unset (default x2)
     fi_dedup_threshold: float = 0.0  # mean abs diff in [0,1]; 0 disables de-duplication
 
+    # Super-resolution (M3)
+    sr_enabled: bool = False
+    sr_model: str = "shufflecugan_x2"  # registry name (task=sr)
+    sr_scale: int | None = None  # target output scale; None -> model's native scale
+
     @classmethod
     def from_settings(cls, s: Settings) -> "PipelineConfig":
         return cls(
@@ -70,6 +75,9 @@ class PipelineConfig:
             fi_target_fps=s.fi_target_fps,
             fi_multiplier=s.fi_multiplier,
             fi_dedup_threshold=s.fi_dedup_threshold,
+            sr_enabled=s.sr_enabled,
+            sr_model=s.sr_model,
+            sr_scale=s.sr_scale,
         )
 
     def interpolate_config(self):
@@ -85,6 +93,14 @@ class PipelineConfig:
             multiplier=self.fi_multiplier,
             dedup_threshold=self.fi_dedup_threshold,
         )
+
+    def upscale_config(self):
+        """UpscaleConfig for this pipeline, or None when SR is disabled."""
+        if not self.sr_enabled:
+            return None
+        from ..stages.upscale.stage import UpscaleConfig  # lazy: pulls torch deps
+
+        return UpscaleConfig(enabled=True, model=self.sr_model, scale=self.sr_scale)
 
     # Fields that do NOT affect lossless segment-chunk content (final-encode / UX only).
     _NON_CONTENT_FIELDS = frozenset({"output_codec", "crf", "container", "audio_passthrough", "keep_workspace"})
@@ -124,6 +140,15 @@ class Stage:
     def process(self, frames: Iterator[np.ndarray], ctx: StageContext) -> Iterator[np.ndarray]:
         raise NotImplementedError
 
+    def output_dims(self, ctx: StageContext) -> tuple[int, int]:
+        """Output (width, height) for a context with the given input dims.
+
+        Declarative so the orchestrator can compute final frame dimensions
+        before encoding lossless chunks (stages are lazy iterators — dims
+        cannot be read off the stream mid-run). Default: identity.
+        """
+        return (ctx.width, ctx.height)
+
 
 class IdentityStage(Stage):
     """M1 placeholder: passes frames through unchanged (re-encode only)."""
@@ -160,7 +185,12 @@ def build_stage_chain(cfg: PipelineConfig) -> list[Stage]:
         from ..stages.interpolate.stage import InterpolateStage  # lazy: pulls torch deps
 
         stages.append(InterpolateStage(fi_cfg))
-    # M3+: UpscaleStage, M4+: QAStage appended here.
+    sr_cfg = cfg.upscale_config()
+    if sr_cfg is not None:
+        from ..stages.upscale.stage import UpscaleStage  # lazy: pulls torch deps
+
+        stages.append(UpscaleStage(sr_cfg))
+    # M4+: QAStage appended here.
     return stages or [IdentityStage()]
 
 
@@ -233,6 +263,15 @@ def run_pipeline(
         num = den = 1
 
     stages = build_stage_chain(cfg)
+
+    # Final frame dimensions: fold the declarative output_dims over the chain.
+    out_w, out_h = info.width, info.height
+    for st in stages:
+        probe_ctx = StageContext(out_w, out_h, info.fps)
+        out_w, out_h = st.output_dims(probe_ctx)
+    if (out_w, out_h) != (info.width, info.height):
+        log.info("Output resolution: %dx%d -> %dx%d", info.width, info.height, out_w, out_h)
+
     # Exact per-segment output frame counts: gap_plan slotting is deterministic
     # and de-duplication fills slots with copies, so the count never changes.
     seg_out_counts = [estimate_output_frames(seg.frame_count, num, den) for seg in segments]
@@ -267,7 +306,8 @@ def run_pipeline(
                 _emit(StageProgress(stage="process", frames_done=done, frames_total=total_frames, fps=rate, eta_s=eta))
 
             seg_file = store.segment_file(seg.index)
-            encode_lossless(_throttled_frames(stream, 30, _on_frame), seg_file, info.width, info.height, out_fps_str)
+            # Chunks carry the FINAL (post-stage) dimensions — e.g. upscaled.
+            encode_lossless(_throttled_frames(stream, 30, _on_frame), seg_file, out_w, out_h, out_fps_str)
             frames_done_global += seg_out_counts[seg.index]
             store.mark_done(seg.index)
             _emit(StageFinished(stage="process", elapsed_s=time.time() - t_seg))
@@ -308,6 +348,8 @@ def run_pipeline(
         "resumed_from": resumed_from,
         "output_fps": out_fps_str,
         "output_frames": total_frames,
+        "output_width": out_w,
+        "output_height": out_h,
         "report": None,  # M4 fills in the artifact report
     }
     _emit(JobFinished(ok=True, output_path=output_path, elapsed_s=result["elapsed_s"], report=None))

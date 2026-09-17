@@ -41,6 +41,11 @@ class Settings:
     fi_multiplier: int | None = None  # e.g. 2, 3, 4 — used when target fps is unset
     fi_dedup_threshold: float = 0.0  # mean abs diff in [0,1]; 0 disables de-duplication
 
+    # Super-resolution (M3)
+    sr_enabled: bool = False
+    sr_model: str = "shufflecugan_x2"  # registry name (task=sr)
+    sr_scale: int | None = None  # target output scale; None -> model's native scale
+
     log_level: str = "INFO"
 
 

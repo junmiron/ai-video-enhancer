@@ -1,6 +1,18 @@
 {
   "models": [
     {
+      "name": "shufflecugan_x2",
+      "task": "sr",
+      "version": "9.584.969",
+      "urls": ["https://github.com/NevermindNilas/TAS-Models-Host/releases/download/main/sudo_shuffle_cugan_9.584.969.pth"],
+      "sha256": "88a6d89f04eaf27a9f7b60937857768a6bc04fb360670bd9951ef533acab0616",
+      "min_vram_gb": 2,
+      "backends": {"cuda": true, "tensorrt": true},
+      "license": "arch MIT (bilibili); weights personal use (TAS mirror)",
+      "recommended_for": "anime upscaling default",
+      "notes": "ShuffleCUGAN x2 (UpCunet2x_fast: internal PixelUnshuffle 3ch->12ch). Tiny (1.4M params), fast, anime-tuned. Input dims must be multiples of 4 and >= 40; the stage pads automatically. Same file TAS's registry points at."
+    },
+    {
       "name": "realesrgan_x4plus",
       "task": "sr",
       "version": "v0.1.0",
