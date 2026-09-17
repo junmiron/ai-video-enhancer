@@ -24,6 +24,82 @@
       "recommended_for": "default frame interpolation (all content)",
       "extract_member": "train_log/flownet.pkl",
       "notes": "Practical-RIFE 4.25 flownet.pkl - upstream's recommended default for most scenes. The Drive link serves a zipped folder bundle; extract_member picks the checkpoint out of it."
+    },
+    {
+      "name": "rife_425_heavy",
+      "task": "fi",
+      "version": "4.25-heavy",
+      "urls": ["https://github.com/NevermindNilas/TAS-Models-Host/releases/download/main/rife425_heavy.pth"],
+      "sha256": "49f7c82d3866860683992042ba8eb559b9c01fbe2600b80a53c56de05bb13b6f",
+      "min_vram_gb": 8,
+      "backends": {"cuda": true, "tensorrt": true},
+      "license": "MIT (Practical-RIFE); weights mirrored by TAS-Models-Host",
+      "recommended_for": "highest-quality interpolation; ~2x the compute of default RIFE 4.25",
+      "notes": "Channel-doubled IFNet variant of RIFE 4.25. No official 'heavy' release exists upstream, so this uses the TAS community mirror (same file TAS's own registry points at)."
+    },
+    {
+      "name": "rife_425_lite",
+      "task": "fi",
+      "version": "4.25-lite",
+      "urls": ["https://github.com/NevermindNilas/TAS-Models-Host/releases/download/main/rife425_lite.pth"],
+      "sha256": "8dcd01f0ad9c59c3155261c1eff894a494fec20b7a692a062072f1f49b002698",
+      "min_vram_gb": 4,
+      "backends": {"cuda": true, "tensorrt": true},
+      "license": "MIT",
+      "recommended_for": "fast interpolation; slightly lower quality than default RIFE 4.25",
+      "notes": "Narrow final-block variant of RIFE 4.25 (block4 c=24). An official 4.25.lite exists on Practical-RIFE's Drive, but the TAS mirror is a single-file download."
+    },
+    {
+      "name": "m2m",
+      "task": "fi",
+      "version": "v1 (CVPR'22)",
+      "urls": ["https://drive.google.com/file/d/1dO-ArTLJ4cMZuN6dttIFFMLtp4I2LnSG/view?usp=sharing"],
+      "sha256": null,
+      "min_vram_gb": 8,
+      "backends": {"cuda": true, "tensorrt": false},
+      "license": "Adobe Research License (non-commercial research only; no redistribution) ⚠️",
+      "recommended_for": "experimental: efficient at high multipliers (4x-8x) - motion estimated once per pair",
+      "experimental": true,
+      "notes": "M2M_VFI (feinanshan). PyTorch reference implementation targets old torch/CUDA; adapter not yet implemented. Weights are a single Drive file."
+    },
+    {
+      "name": "gmfss",
+      "task": "fi",
+      "version": "fortuna-union (2023)",
+      "urls": ["https://github.com/NevermindNilas/TAS-Models-Host/releases/download/main/gmfss-fortuna-union.zip"],
+      "sha256": null,
+      "min_vram_gb": 8,
+      "backends": {"cuda": true, "tensorrt": false},
+      "license": "No license file upstream ⚠️ (personal use only)",
+      "recommended_for": "experimental: anime-oriented interpolation; TAS's best-maintained community variant",
+      "experimental": true,
+      "notes": "GMFSS (routineLife1/GMFSS) weights bundle as mirrored by TAS. Upstream project is archived in favor of GMFSS_Fortuna (98mxr). Requires the CUDA softsplat kernel (TAS vendors it under src/gmfss/); adapter not yet implemented."
+    },
+    {
+      "name": "film",
+      "task": "fi",
+      "version": "v1 (ECCV'22)",
+      "urls": [],
+      "sha256": null,
+      "min_vram_gb": 8,
+      "backends": {"cuda": true, "tensorrt": false},
+      "license": "Apache-2.0",
+      "recommended_for": "experimental: high-quality benchmark model (large motion)",
+      "experimental": true,
+      "notes": "FILM (google-research/frame-interpolation). Official weights are TF2 SavedModels in a Google Drive folder (id 1q8110-qp225asX3DQvZnfLfJPkCHmDpy); no single-file URL, so download stays disabled until the adapter picks specific files. Adapter not yet implemented."
+    },
+    {
+      "name": "amt_sicdia",
+      "task": "fi",
+      "version": "v1 (ECCV'24)",
+      "urls": [],
+      "sha256": null,
+      "min_vram_gb": 8,
+      "backends": {"cuda": true, "tensorrt": false},
+      "license": "TBD ⚠️",
+      "recommended_for": "experimental: SOTA large-motion interpolation; also the planned ghost-repair alternate model (M4)",
+      "experimental": true,
+      "notes": "AMT-SICDIA (Adaptive Motion Transformer). Public weights URL not located as of 2026-09-17; confirm at adapter time. Adapter not yet implemented."
     }
   ]
 }

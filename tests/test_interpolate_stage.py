@@ -144,6 +144,26 @@ def test_interpolate_stage_with_real_rife_torch():
 
 
 @pytest.mark.gpu
+@pytest.mark.parametrize("variant", ["rife_425", "rife_425_heavy", "rife_425_lite"])
+def test_rife_variants_torch_sanity(variant):
+    """Every RIFE 4.25-family variant loads its weights and synthesizes a frame (torch mode)."""
+    from aive.models.downloader import download_model
+    from aive.models.registry import get_model
+    from aive.stages.interpolate.stage import RIFERunner
+
+    weights = download_model(get_model(variant))
+    runner = RIFERunner(weights, width=96, height=64, use_trt=False, variant=variant)
+    assert (runner.pw, runner.ph) == (128, 64)
+
+    frames = _moving_frames(3)
+    out = runner(frames[0], frames[2], 0.5)
+    assert out.shape == (64, 96, 3) and out.dtype == np.uint8
+    # The interpolated frame must differ from both endpoints (real motion synthesis).
+    assert not np.array_equal(out, frames[0])
+    assert not np.array_equal(out, frames[2])
+
+
+@pytest.mark.gpu
 def test_rife_trt_engine_tiny_shape():
     """Legacy ONNX export -> TRT engine build -> multi-input infer_multi.
 

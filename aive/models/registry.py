@@ -23,6 +23,7 @@ class ModelInfo:
     license: str = ""
     recommended_for: str = ""
     notes: str = ""
+    experimental: bool = False  # listed in the UI but not part of the stable pipeline
     extract_member: str | None = None  # if set, the download is an archive; this member becomes the weights file
 
 
@@ -48,3 +49,11 @@ def get_model(name: str, task: str | None = None, path: str | Path | None = None
     if task is not None and info.task != task:
         raise ValueError(f"Model '{name}' has task '{info.task}', expected '{task}'")
     return info
+
+
+def list_models(task: str | None = None, path: str | Path | None = None) -> list[ModelInfo]:
+    """All registered models (optionally filtered by task), sorted for UI display."""
+    items = sorted(load_manifest(path).values(), key=lambda m: (m.task, m.name))
+    if task is not None:
+        items = [m for m in items if m.task == task]
+    return items

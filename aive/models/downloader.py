@@ -49,6 +49,12 @@ def download_model(
     """Download (or return cached) weights for `info`. Returns the local path."""
     from ..config import model_cache_dir
 
+    if not info.urls:
+        raise DownloadError(
+            f"{info.name}: no download URLs configured "
+            "(experimental model; adapter work pending)"
+        )
+
     base = Path(dest_dir) if dest_dir else model_cache_dir() / info.name / info.version
     base.mkdir(parents=True, exist_ok=True)
 

@@ -1,4 +1,9 @@
-"""RIFE 4.25 loading, stateless inference helpers and ONNX export.
+"""RIFE 4.25 family loading, stateless inference helpers and ONNX export.
+
+Variants share the IFNet structure and differ only in block channel widths:
+``rife_425`` (default), ``rife_425_heavy`` (doubled channels) and
+``rife_425_lite`` (narrow final block). All are loaded through the same
+state-dict normalization and exported with the same stateless wrapper.
 
 The vendored arch (``_rife425_arch.IFNet``) is *stateful* by design: its
 forward caches ``f0 = encode(img0)`` on the first call and reuses it forever
@@ -21,16 +26,33 @@ from pathlib import Path
 log = logging.getLogger(__name__)
 
 
-def build_rife_425(device: str = "cuda", dtype=None):
-    """Construct a fresh RIFE 4.25 IFNet (weights NOT loaded)."""
-    import torch
+# Registry names for the RIFE 4.25 family (manifest `task: fi` models).
+RIFE_VARIANTS = ("rife_425", "rife_425_heavy", "rife_425_lite")
 
-    from ._rife425_arch import IFNet
 
-    model = IFNet(ensemble=False, dynamicScale=False, scale=1.0, interpolateFactor=2)
+def _build_variant_arch(variant: str):
+    if variant == "rife_425":
+        from ._rife425_arch import IFNet
+    elif variant == "rife_425_heavy":
+        from ._rife425heavy_arch import IFNet
+    elif variant == "rife_425_lite":
+        from ._rife425lite_arch import IFNet
+    else:
+        raise ValueError(f"Unknown RIFE variant '{variant}'. Known: {list(RIFE_VARIANTS)}")
+    return IFNet(ensemble=False, dynamicScale=False, scale=1.0, interpolateFactor=2)
+
+
+def build_rife(variant: str = "rife_425", device: str = "cuda", dtype=None):
+    """Construct a fresh RIFE model for `variant` (weights NOT loaded)."""
+    model = _build_variant_arch(variant)
     if dtype is not None:
         model = model.to(dtype=dtype)
     return model.to(device)
+
+
+def build_rife_425(device: str = "cuda", dtype=None):
+    """Back-compat alias for :func:`build_rife` with the base 4.25 variant."""
+    return build_rife("rife_425", device=device, dtype=dtype)
 
 
 def _normalize_rife_state(state: dict) -> dict:
@@ -71,14 +93,24 @@ def apply_rife_state(model, state: dict) -> None:
         )
 
 
-def load_rife_425(weights_path: str | Path, device: str = "cuda", dtype=None):
-    """Load RIFE 4.25 weights (Practical-RIFE flownet.pkl / TAS rife425.pth)."""
-    model = build_rife_425(device=device, dtype=dtype)
+def load_rife(
+    variant: str = "rife_425",
+    weights_path: str | Path = None,
+    device: str = "cuda",
+    dtype=None,
+):
+    """Load RIFE 4.25-family weights (Practical-RIFE flownet.pkl / TAS .pth)."""
+    model = build_rife(variant, device=device, dtype=dtype)
     state = load_rife_state_dict(weights_path)
     apply_rife_state(model, state)
     del state
-    log.info("Loaded RIFE 4.25 weights from %s", weights_path)
+    log.info("Loaded RIFE %s weights from %s", variant, weights_path)
     return model
+
+
+def load_rife_425(weights_path: str | Path, device: str = "cuda", dtype=None):
+    """Back-compat alias for :func:`load_rife` with the base 4.25 variant."""
+    return load_rife("rife_425", weights_path=weights_path, device=device, dtype=dtype)
 
 
 def reset_for_call(model) -> None:

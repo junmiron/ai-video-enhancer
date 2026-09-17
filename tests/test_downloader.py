@@ -36,6 +36,14 @@ def test_download_and_cache(tmp_path, monkeypatch):
     assert path2 == path
 
 
+def test_no_urls_rejected_without_network_or_dir(tmp_path):
+    dest = tmp_path / "cache"
+    info = ModelInfo(name="nope", task="fi", version="1", urls=[])
+    with pytest.raises(DownloadError, match="no download URLs"):
+        download_model(info, dest_dir=dest)
+    assert not dest.exists()  # guard fires before any filesystem work
+
+
 def test_hash_mismatch_rejected(tmp_path):
     dest = tmp_path / "cache"
     bad = _info(sha256="0" * 64)

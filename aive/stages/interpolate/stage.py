@@ -20,7 +20,13 @@ from typing import Iterator
 import numpy as np
 
 from .gapplan import fps_ratio, gap_plan, interpolate_timestep
-from .rife_model import RIFEExportWrapper, load_rife_425, reset_for_call
+from .rife_model import (
+    RIFE_VARIANTS,
+    RIFEExportWrapper,
+    build_rife,
+    load_rife,
+    reset_for_call,
+)
 
 log = logging.getLogger(__name__)
 
@@ -48,13 +54,23 @@ class InterpolateConfig:
 
 
 class RIFERunner:
-    """Runs one RIFE 4.25 model at a fixed (padded) resolution on TRT or CUDA."""
+    """Runs one RIFE 4.25-family model at a fixed (padded) resolution on TRT or CUDA."""
 
     PAD_MOD = 64  # TAS's mod for the 4.25 family; keeps every pyramid level integral
 
-    def __init__(self, weights_path: str | Path, width: int, height: int, use_trt: bool = True):
+    def __init__(
+        self,
+        weights_path: str | Path,
+        width: int,
+        height: int,
+        use_trt: bool = True,
+        variant: str = "rife_425",
+    ):
         import torch
 
+        if variant not in RIFE_VARIANTS:
+            raise ValueError(f"Unknown RIFE variant '{variant}'. Known: {list(RIFE_VARIANTS)}")
+        self.variant = variant
         self.torch = torch
         self.width, self.height = width, height
         self.pw = math.ceil(width / self.PAD_MOD) * self.PAD_MOD
@@ -72,7 +88,7 @@ class RIFERunner:
                 log.warning("TRT engine unavailable for RIFE (%s); falling back to PyTorch-CUDA.", exc)
         if self._trt_runner is None:
             dtype = torch.float32 if self.uhd else torch.float16
-            self._torch_model = load_rife_425(weights_path, device="cuda", dtype=dtype).eval()
+            self._torch_model = load_rife(self.variant, weights_path, device="cuda", dtype=dtype).eval()
 
     # -- backend setup -------------------------------------------------------
 
@@ -80,19 +96,18 @@ class RIFERunner:
         import hashlib
 
         from ...inference.trt import TrtRunner, build_engine, engine_cache_dir
-        from .rife_model import build_rife_425
 
         weights_path = Path(weights_path)
         sha = hashlib.sha256(weights_path.read_bytes()).hexdigest()[:16]
-        profile = f"rife425|{self.width}x{self.height}|pad{self.pw}x{self.ph}"
+        profile = f"{self.variant}|{self.width}x{self.height}|pad{self.pw}x{self.ph}"
         key = hashlib.sha256(f"{sha}|{self.precision}|{profile}".encode()).hexdigest()[:32]
 
         cache_dir = engine_cache_dir() / "rife"
-        onnx_path = cache_dir / f"rife425_{key}.onnx"
-        engine_path = cache_dir / f"rife425_{key}_{self.precision}.engine"
+        onnx_path = cache_dir / f"{self.variant}_{key}.onnx"
+        engine_path = cache_dir / f"{self.variant}_{key}_{self.precision}.engine"
 
         if not engine_path.exists():
-            model = build_rife_425(device="cuda", dtype=None)  # fp32 export; TRT picks layer precision
+            model = build_rife(self.variant, device="cuda", dtype=None)  # fp32 export; TRT picks layer precision
             load_state(weights_path, model)
             RIFEExportWrapper.export(model, onnx_path, self.ph, self.pw)
             del model
@@ -101,7 +116,10 @@ class RIFERunner:
             torch.cuda.empty_cache()
             build_engine(onnx_path, engine_path, precision=self.precision)
         self._trt_runner = TrtRunner(engine_path)
-        log.info("RIFE TRT runner ready (%s, %dx%d padded to %dx%d)", self.precision, self.width, self.height, self.pw, self.ph)
+        log.info(
+            "RIFE TRT runner ready (%s, %s, %dx%d padded to %dx%d)",
+            self.variant, self.precision, self.width, self.height, self.pw, self.ph,
+        )
 
     # -- inference -----------------------------------------------------------
 
@@ -171,13 +189,18 @@ class InterpolateStage:
         from ...models.registry import get_model
 
         if self._runner is None:
+            if self.cfg.model not in RIFE_VARIANTS:
+                raise ValueError(
+                    f"Model '{self.cfg.model}' is not a RIFE 4.25-family model; "
+                    "experimental FI adapters (M2M/GMFSS/FILM/AMT) land later."
+                )
             info = get_model(self.cfg.model)
             weights = download_model(info)
             log.info("Interpolation: %s @ %dx%d (target %.3ffps, dedup=%s)",
                      self.cfg.model, ctx.width, ctx.height,
                      self.cfg.output_fps(_fps_from_str(ctx.fps)),
                      f"{self.cfg.dedup_threshold:g}" if self.cfg.dedup_threshold > 0 else "off")
-            self._runner = RIFERunner(weights, ctx.width, ctx.height)
+            self._runner = RIFERunner(weights, ctx.width, ctx.height, variant=self.cfg.model)
 
         num, den = self.cfg.ratio(_fps_from_str(ctx.fps))
         prev: np.ndarray | None = None
