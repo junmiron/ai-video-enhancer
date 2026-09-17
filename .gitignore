@@ -1,0 +1,17 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+.pytest_cache/
+.ruff_cache/
+
+# Project data (never commit generated artifacts)
+workspaces/
+models-cache/
+*.log
+
+# OS
+Thumbs.db
+Desktop.ini
+.DS_Store

@@ -1,0 +1,28 @@
+{
+  "models": [
+    {
+      "name": "realesrgan_x4plus",
+      "task": "sr",
+      "version": "v0.1.0",
+      "urls": ["https://github.com/xinntao/Real-ESRGAN/releases/download/v0.1.0/RealESRGAN_x4plus.pth"],
+      "sha256": "4fa0d38905f75ac06eb49a7951b426670021be3018265fd191d2125df9d682f1",
+      "min_vram_gb": 4,
+      "backends": {"cuda": true, "tensorrt": true},
+      "license": "code BSD-3; weights non-commercial",
+      "recommended_for": "live action / general (Live Action preset default)",
+      "notes": "Battle-tested x4 SR + denoise. Weights are NC-licensed: OK for personal use per project decision D3."
+    },
+    {
+      "name": "rife_425",
+      "task": "fi",
+      "version": "4.25",
+      "urls": ["https://drive.google.com/file/d/1ZKjcbmt1hypiFprJPIKW0Tt0lr_2i7bg/view?usp=share_link"],
+      "sha256": "e63d481b7ae5d4a4e6ad7ac5b410ff78f3bf7be3b51b2e38ca8152747abde5b4",
+      "min_vram_gb": 4,
+      "backends": {"cuda": true, "tensorrt": true},
+      "license": "MIT",
+      "recommended_for": "default frame interpolation (all content)",
+      "notes": "Practical-RIFE 4.25 flownet.pkl - upstream's recommended default for most scenes."
+    }
+  ]
+}

@@ -1,0 +1,29 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "aive"
+version = "0.1.0"
+description = "AI Video Enhancer - AI upscale, frame interpolation, artifact detection & repair"
+readme = "README.md"
+requires-python = ">=3.11"
+license = { text = "MIT" }
+dependencies = [
+    "numpy",
+    "opencv-python",
+    "torch",
+    "onnx",
+    "tensorrt",
+    "scenedetect[opencv]",
+]
+
+[project.optional-dependencies]
+dev = ["pytest"]
+
+[tool.setuptools.packages.find]
+include = ["aive*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"
