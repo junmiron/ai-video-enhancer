@@ -8,6 +8,7 @@ output fps, and progress accounting uses exact gap_plan slot counts.
 """
 from __future__ import annotations
 
+import hashlib
 import logging
 import time
 from dataclasses import dataclass, field
@@ -84,6 +85,24 @@ class PipelineConfig:
             multiplier=self.fi_multiplier,
             dedup_threshold=self.fi_dedup_threshold,
         )
+
+    # Fields that do NOT affect lossless segment-chunk content (final-encode / UX only).
+    _NON_CONTENT_FIELDS = frozenset({"output_codec", "crf", "container", "audio_passthrough", "keep_workspace"})
+
+    def content_fingerprint(self) -> str:
+        """Stable hash of every setting that affects lossless chunk content.
+
+        New PipelineConfig fields are included automatically, so future stages
+        (M3 upscale, M4 QA) invalidate checkpoints correctly without touching
+        this code. Encode-only settings stay excluded on purpose: changing the
+        final codec/CRF must not force a full re-run of the GPU stages.
+        """
+        import hashlib
+        import json
+        from dataclasses import fields as _dc_fields
+
+        payload = {f.name: getattr(self, f.name) for f in _dc_fields(self) if f.name not in self._NON_CONTENT_FIELDS}
+        return hashlib.sha256(json.dumps(payload, sort_keys=True, default=str).encode()).hexdigest()[:32]
 
 
 @dataclass
@@ -187,8 +206,15 @@ def run_pipeline(
         raw_segments = [(0, info.num_frames)]
     segments = [Segment(i, s, e) for i, (s, e) in enumerate(raw_segments)]
 
+    # Resume identity: same input file (path + size + mtime) AND same
+    # content-affecting settings. Anything else discards stale chunks.
+    st = Path(input_path).stat()
+    fingerprint = hashlib.sha256(
+        f"{input_path}|{st.st_size}|{st.st_mtime_ns}|{cfg.content_fingerprint()}".encode()
+    ).hexdigest()[:32]
+
     store = CheckpointStore(workspaces_dir() / job_id)
-    store.init_job(job_id, input_path, info.width, info.height, info.fps, segments)
+    store.init_job(job_id, input_path, info.width, info.height, info.fps, segments, fingerprint=fingerprint)
     resumed_from = store.done_count
     if resumed_from:
         log.info("Resuming: %d/%d segment(s) already done.", resumed_from, len(segments))
