@@ -27,3 +27,6 @@ include = ["aive*"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "-q"
+markers = [
+    "gpu: tests that require CUDA + cached model weights (RIFE inference / TRT engine build)",
+]

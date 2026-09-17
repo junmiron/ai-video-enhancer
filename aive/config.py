@@ -34,6 +34,13 @@ class Settings:
     scene_split: bool = True
     keep_workspace: bool = False  # keep FFV1 segment chunks after success
 
+    # Frame interpolation (M2)
+    fi_enabled: bool = False
+    fi_model: str = "rife_425"  # registry name (heavy/lite variants arrive with M2.x)
+    fi_target_fps: float | None = None  # e.g. 60.0 — wins over multiplier when set
+    fi_multiplier: int | None = None  # e.g. 2, 3, 4 — used when target fps is unset
+    fi_dedup_threshold: float = 0.0  # mean abs diff in [0,1]; 0 disables de-duplication
+
     log_level: str = "INFO"
 
 

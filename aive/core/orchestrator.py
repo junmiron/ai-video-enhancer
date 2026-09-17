@@ -1,7 +1,10 @@
 """Pipeline orchestrator: runs stages per scene segment with checkpointing.
 
-M1 stage chain is identity (decode -> re-encode lossless chunks -> final encode).
-M2+ plug in InterpolateStage / UpscaleStage / QAStage via build_stage_chain().
+Stage order follows design.md (TAS-proven): interpolate -> upscale -> QA/restore.
+M2 plugs in InterpolateStage; M3/M4 append UpscaleStage / QAStage via
+build_stage_chain(). When interpolation is enabled the output frame rate differs
+from the source: per-segment lossless chunks and the final encode both use the
+output fps, and progress accounting uses exact gap_plan slot counts.
 """
 from __future__ import annotations
 
@@ -16,6 +19,7 @@ import numpy as np
 from ..config import Settings, workspaces_dir
 from ..stages.encode import concat_encode, encode_lossless
 from ..stages.ingest import MediaInfo, decode_frames, probe
+from ..stages.interpolate.gapplan import estimate_output_frames  # pure Python, no torch
 from ..stages.scenes import detect_scenes
 from .checkpoint import CheckpointStore, Segment
 from .events import (
@@ -44,6 +48,13 @@ class PipelineConfig:
     audio_passthrough: bool = True
     keep_workspace: bool = False
 
+    # Frame interpolation (M2)
+    fi_enabled: bool = False
+    fi_model: str = "rife_425"  # registry name
+    fi_target_fps: float | None = None  # wins over multiplier when set
+    fi_multiplier: int | None = None  # used when target fps is unset (default x2)
+    fi_dedup_threshold: float = 0.0  # mean abs diff in [0,1]; 0 disables de-duplication
+
     @classmethod
     def from_settings(cls, s: Settings) -> "PipelineConfig":
         return cls(
@@ -53,6 +64,25 @@ class PipelineConfig:
             container=s.container,
             audio_passthrough=s.audio_passthrough,
             keep_workspace=s.keep_workspace,
+            fi_enabled=s.fi_enabled,
+            fi_model=s.fi_model,
+            fi_target_fps=s.fi_target_fps,
+            fi_multiplier=s.fi_multiplier,
+            fi_dedup_threshold=s.fi_dedup_threshold,
+        )
+
+    def interpolate_config(self):
+        """InterpolateConfig for this pipeline, or None when FI is disabled."""
+        if not self.fi_enabled:
+            return None
+        from ..stages.interpolate.stage import InterpolateConfig  # lazy: pulls torch deps
+
+        return InterpolateConfig(
+            enabled=True,
+            model=self.fi_model,
+            target_fps=self.fi_target_fps,
+            multiplier=self.fi_multiplier,
+            dedup_threshold=self.fi_dedup_threshold,
         )
 
 
@@ -85,9 +115,34 @@ class IdentityStage(Stage):
         yield from frames
 
 
+def _fps_to_float(fps: str) -> float:
+    """Parse ffmpeg's rational fps string ('24/1', '30000/1001') to float."""
+    if "/" in fps:
+        num, den = fps.split("/")
+        return float(num) / max(1e-9, float(den))
+    return float(fps)
+
+
+def _fps_to_str(fps: float) -> str:
+    """Float fps -> ffmpeg rational string (exact for common rates like 59.94)."""
+    from fractions import Fraction
+
+    fr = Fraction(round(fps, 6)).limit_denominator(1000)
+    if fr.denominator == 1:
+        return str(fr.numerator)
+    return f"{fr.numerator}/{fr.denominator}"
+
+
 def build_stage_chain(cfg: PipelineConfig) -> list[Stage]:
-    # M2+: append InterpolateStage / UpscaleStage / QAStage here based on cfg.
-    return [IdentityStage()]
+    """Assemble the stage chain (design.md order: interpolate -> upscale -> QA)."""
+    stages: list[Stage] = []
+    fi_cfg = cfg.interpolate_config()
+    if fi_cfg is not None:
+        from ..stages.interpolate.stage import InterpolateStage  # lazy: pulls torch deps
+
+        stages.append(InterpolateStage(fi_cfg))
+    # M3+: UpscaleStage, M4+: QAStage appended here.
+    return stages or [IdentityStage()]
 
 
 def _throttled_frames(frames: Iterator[np.ndarray], every: int, on_frame: Callable[[int], None]) -> Iterator[np.ndarray]:
@@ -138,8 +193,24 @@ def run_pipeline(
     if resumed_from:
         log.info("Resuming: %d/%d segment(s) already done.", resumed_from, len(segments))
 
+    fi_cfg = cfg.interpolate_config()
+    if fi_cfg is not None:
+        src_fps_f = _fps_to_float(info.fps)
+        out_fps_str = _fps_to_str(fi_cfg.output_fps(src_fps_f))
+        num, den = fi_cfg.ratio(src_fps_f)
+        log.info(
+            "Interpolation enabled: %s -> output fps %s (ratio %d/%d)",
+            cfg.fi_model, out_fps_str, num, den,
+        )
+    else:
+        out_fps_str = info.fps
+        num = den = 1
+
     stages = build_stage_chain(cfg)
-    total_frames = sum(seg.frame_count for seg in segments)
+    # Exact per-segment output frame counts: gap_plan slotting is deterministic
+    # and de-duplication fills slots with copies, so the count never changes.
+    seg_out_counts = [estimate_output_frames(seg.frame_count, num, den) for seg in segments]
+    total_frames = sum(seg_out_counts)
     frames_done_global = 0
 
     try:
@@ -151,7 +222,7 @@ def run_pipeline(
                 raise PipelineCancelled()
 
             t_seg = time.time()
-            _emit(StageStarted(stage="process", total_frames=seg.frame_count))
+            _emit(StageStarted(stage="process", total_frames=seg_out_counts[seg.index]))
             log.info("Segment %d/%d frames [%d:%d]", seg.index + 1, len(segments), seg.start_frame, seg.end_frame)
 
             raw = decode_frames(input_path, start_frame=seg.start_frame, count=seg.frame_count)
@@ -170,8 +241,8 @@ def run_pipeline(
                 _emit(StageProgress(stage="process", frames_done=done, frames_total=total_frames, fps=rate, eta_s=eta))
 
             seg_file = store.segment_file(seg.index)
-            encode_lossless(_throttled_frames(stream, 30, _on_frame), seg_file, info.width, info.height, info.fps)
-            frames_done_global += seg.frame_count
+            encode_lossless(_throttled_frames(stream, 30, _on_frame), seg_file, info.width, info.height, out_fps_str)
+            frames_done_global += seg_out_counts[seg.index]
             store.mark_done(seg.index)
             _emit(StageFinished(stage="process", elapsed_s=time.time() - t_seg))
 
@@ -186,7 +257,7 @@ def run_pipeline(
         concat_encode(
             store.concat_list_file(),
             output_path,
-            fps=info.fps,
+            fps=out_fps_str,
             preset=cfg.output_codec,
             crf=cfg.crf,
             container=cfg.container,
@@ -209,6 +280,8 @@ def run_pipeline(
         "elapsed_s": time.time() - t_start,
         "segments_total": len(segments),
         "resumed_from": resumed_from,
+        "output_fps": out_fps_str,
+        "output_frames": total_frames,
         "report": None,  # M4 fills in the artifact report
     }
     _emit(JobFinished(ok=True, output_path=output_path, elapsed_s=result["elapsed_s"], report=None))

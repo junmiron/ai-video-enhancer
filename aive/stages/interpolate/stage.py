@@ -1,0 +1,224 @@
+"""Frame-interpolation pipeline stage (RIFE 4.25 family).
+
+Scene-cut protection is structural: the orchestrator runs this stage once per
+scene segment, so interpolation never crosses a cut. De-duplication skips model
+calls for near-identical consecutive source frames (common in anime) and fills
+their slots with copies of the previous frame — timing stays exact because slot
+counting comes from :mod:`gapplan`.
+
+Backends: TensorRT engine (primary; fp16 below UHD, fp32 at/above it per TAS's
+flicker finding) with a PyTorch-CUDA fallback for non-exportable situations.
+"""
+from __future__ import annotations
+
+import logging
+import math
+from dataclasses import dataclass
+from pathlib import Path
+from typing import Iterator
+
+import numpy as np
+
+from .gapplan import fps_ratio, gap_plan, interpolate_timestep
+from .rife_model import RIFEExportWrapper, load_rife_425, reset_for_call
+
+log = logging.getLogger(__name__)
+
+
+@dataclass
+class InterpolateConfig:
+    """User-facing interpolation settings (M6 UI maps onto this)."""
+
+    enabled: bool = False
+    model: str = "rife_425"  # registry name; heavy/lite variants land with M2.x
+    target_fps: float | None = None  # e.g. 60.0 — wins over multiplier when set
+    multiplier: int | None = None  # e.g. 2, 3, 4
+    dedup_threshold: float = 0.0  # mean abs diff (0..1); 0 disables de-duplication
+
+    def ratio(self, source_fps: float) -> tuple[int, int]:
+        """(factor_num, factor_den) for gap_plan given the source fps."""
+        if self.target_fps is not None and self.target_fps > 0:
+            return fps_ratio(source_fps, self.target_fps)
+        m = int(self.multiplier or 2)
+        return m, 1
+
+    def output_fps(self, source_fps: float) -> float:
+        num, den = self.ratio(source_fps)
+        return source_fps * num / den
+
+
+class RIFERunner:
+    """Runs one RIFE 4.25 model at a fixed (padded) resolution on TRT or CUDA."""
+
+    PAD_MOD = 64  # TAS's mod for the 4.25 family; keeps every pyramid level integral
+
+    def __init__(self, weights_path: str | Path, width: int, height: int, use_trt: bool = True):
+        import torch
+
+        self.torch = torch
+        self.width, self.height = width, height
+        self.pw = math.ceil(width / self.PAD_MOD) * self.PAD_MOD
+        self.ph = math.ceil(height / self.PAD_MOD) * self.PAD_MOD
+        # TAS: UHD + fp16 flickers -> fp32 above 1080p sources.
+        self.uhd = width > 1920 and height > 1080
+        self.precision = "default" if self.uhd else "fp16"
+
+        self._trt_runner = None
+        self._torch_model = None
+        if use_trt:
+            try:
+                self._build_trt(weights_path)
+            except Exception as exc:  # pragma: no cover - TRT build edge cases
+                log.warning("TRT engine unavailable for RIFE (%s); falling back to PyTorch-CUDA.", exc)
+        if self._trt_runner is None:
+            dtype = torch.float32 if self.uhd else torch.float16
+            self._torch_model = load_rife_425(weights_path, device="cuda", dtype=dtype).eval()
+
+    # -- backend setup -------------------------------------------------------
+
+    def _build_trt(self, weights_path: str | Path) -> None:
+        import hashlib
+
+        from ...inference.trt import TrtRunner, build_engine, engine_cache_dir
+        from .rife_model import build_rife_425
+
+        weights_path = Path(weights_path)
+        sha = hashlib.sha256(weights_path.read_bytes()).hexdigest()[:16]
+        profile = f"rife425|{self.width}x{self.height}|pad{self.pw}x{self.ph}"
+        key = hashlib.sha256(f"{sha}|{self.precision}|{profile}".encode()).hexdigest()[:32]
+
+        cache_dir = engine_cache_dir() / "rife"
+        onnx_path = cache_dir / f"rife425_{key}.onnx"
+        engine_path = cache_dir / f"rife425_{key}_{self.precision}.engine"
+
+        if not engine_path.exists():
+            model = build_rife_425(device="cuda", dtype=None)  # fp32 export; TRT picks layer precision
+            load_state(weights_path, model)
+            RIFEExportWrapper.export(model, onnx_path, self.ph, self.pw)
+            del model
+            import torch
+
+            torch.cuda.empty_cache()
+            build_engine(onnx_path, engine_path, precision=self.precision)
+        self._trt_runner = TrtRunner(engine_path)
+        log.info("RIFE TRT runner ready (%s, %dx%d padded to %dx%d)", self.precision, self.width, self.height, self.pw, self.ph)
+
+    # -- inference -----------------------------------------------------------
+
+    def __call__(self, img0: np.ndarray, img1: np.ndarray, t: float) -> np.ndarray:
+        """Interpolate one frame between HWC uint8 frames at timestep t in (0,1)."""
+        if self._trt_runner is not None:
+            out = self._run_trt(img0, img1, t)
+        else:
+            out = self._run_torch(img0, img1, t)
+        return np.clip(np.round(out), 0, 255).astype(np.uint8)
+
+    def _pad(self, frame_hwc_u8: np.ndarray) -> "np.ndarray | object":
+        """HWC uint8 [h,w] -> NCHW float32 [0,1] padded to (ph,pw), zero border."""
+        f = frame_hwc_u8.astype(np.float32) / 255.0
+        nchw = np.ascontiguousarray(f.transpose(2, 0, 1)[None])
+        if self.pw != self.width or self.ph != self.height:
+            padded = np.zeros((1, 3, self.ph, self.pw), dtype=np.float32)
+            padded[:, :, : self.height, : self.width] = nchw
+            return padded
+        return nchw
+
+    def _run_trt(self, img0: np.ndarray, img1: np.ndarray, t: float) -> np.ndarray:
+        ts = np.full((1, 1, self.ph, self.pw), t, dtype=np.float32)
+        out = self._trt_runner.infer_multi(
+            {"img0": self._pad(img0), "img1": self._pad(img1), "timestep": ts}
+        )["output"]
+        return out[0, :, : self.height, : self.width].transpose(1, 2, 0)
+
+    def _run_torch(self, img0: np.ndarray, img1: np.ndarray, t: float) -> np.ndarray:
+        torch = self.torch
+        model = self._torch_model
+        dev = next(model.parameters()).device
+        dtype = next(model.parameters()).dtype
+        with torch.no_grad():
+            a = torch.from_numpy(self._pad(img0)).to(dev, non_blocking=True).to(dtype)
+            b = torch.from_numpy(self._pad(img1)).to(dev, non_blocking=True).to(dtype)
+            ts = torch.full((1, 1, self.ph, self.pw), t, device=dev, dtype=dtype)
+            reset_for_call(model)
+            out = model(a, b, ts)
+        return out[0, :, : self.height, : self.width].float().cpu().numpy().transpose(1, 2, 0)
+
+
+def load_state(weights_path: Path, model) -> None:
+    """Load weights into a pre-built arch (inference keys must all be present)."""
+    from .rife_model import apply_rife_state, load_rife_state_dict
+
+    apply_rife_state(model, load_rife_state_dict(weights_path))
+
+
+class InterpolateStage:
+    """Pipeline stage: source frames -> interpolated frames at the target rate."""
+
+    name = "interpolate"
+
+    def __init__(self, cfg: InterpolateConfig):
+        self.cfg = cfg
+        self._runner: RIFERunner | None = None
+        self.model_calls = 0
+        self.dedup_skips = 0
+
+    # -- stage interface ------------------------------------------------------
+
+    def process(self, frames: Iterator[np.ndarray], ctx) -> Iterator[np.ndarray]:
+        import torch  # noqa: F401 - ensure CUDA context is up before first model use
+
+        from ...models.downloader import download_model
+        from ...models.registry import get_model
+
+        if self._runner is None:
+            info = get_model(self.cfg.model)
+            weights = download_model(info)
+            log.info("Interpolation: %s @ %dx%d (target %.3ffps, dedup=%s)",
+                     self.cfg.model, ctx.width, ctx.height,
+                     self.cfg.output_fps(_fps_from_str(ctx.fps)),
+                     f"{self.cfg.dedup_threshold:g}" if self.cfg.dedup_threshold > 0 else "off")
+            self._runner = RIFERunner(weights, ctx.width, ctx.height)
+
+        num, den = self.cfg.ratio(_fps_from_str(ctx.fps))
+        prev: np.ndarray | None = None
+        prev_pos = 0
+        for cur_pos, frame in enumerate(frames):
+            if prev is None:
+                yield frame
+                prev = frame
+                continue
+
+            n_insert, timesteps = gap_plan(prev_pos, cur_pos, num, den)
+            if (
+                self.cfg.dedup_threshold > 0
+                and n_insert > 0
+                and _mean_abs_diff(prev, frame) < self.cfg.dedup_threshold
+            ):
+                # Near-duplicate pair: fill slots with copies, no model calls.
+                for _ in range(n_insert):
+                    yield prev.copy()
+                self.dedup_skips += n_insert
+            else:
+                for i in range(n_insert):
+                    t = interpolate_timestep(i, n_insert, timesteps)
+                    yield self._runner(prev, frame, t)
+                    self.model_calls += 1
+
+            yield frame
+            prev = frame
+            prev_pos = cur_pos
+
+
+def _fps_from_str(fps: str) -> float:
+    """Parse ffmpeg's rational fps string ('24/1', '30000/1001') to float."""
+    if "/" in fps:
+        num, den = fps.split("/")
+        return float(num) / max(1.0, float(den))
+    return float(fps)
+
+
+def _mean_abs_diff(a: np.ndarray, b: np.ndarray) -> float:
+    """Mean absolute difference of two HWC uint8 frames in [0, 1]."""
+    if a.shape != b.shape:
+        return 1.0
+    return float(np.abs(a.astype(np.int16) - b.astype(np.int16)).mean()) / 255.0

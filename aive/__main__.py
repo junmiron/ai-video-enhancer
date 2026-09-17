@@ -5,6 +5,7 @@ Usage:
   python -m aive passthrough <in> <out>
   python -m aive pipeline <in> <out> [--no-scene-split] [--codec X] [--crf N]
                             [--container mp4|mkv] [--keep-workspace]
+                            [--fi] [--target-fps F] [--fi-multiplier N] [--dedup-threshold T]
   python -m aive download-model <name>
 """
 from __future__ import annotations
@@ -28,7 +29,7 @@ def main(argv: list[str] | None = None) -> int:
     p_pt.add_argument("input")
     p_pt.add_argument("output")
 
-    p_pipe = sub.add_parser("pipeline", help="full M1 pipeline (identity stages + checkpointing)")
+    p_pipe = sub.add_parser("pipeline", help="full pipeline (M2: frame interpolation via --fi; checkpointed segments)")
     p_pipe.add_argument("input")
     p_pipe.add_argument("output")
     p_pipe.add_argument("--no-scene-split", action="store_true")
@@ -36,6 +37,10 @@ def main(argv: list[str] | None = None) -> int:
     p_pipe.add_argument("--crf", type=int, default=None)
     p_pipe.add_argument("--container", choices=["mp4", "mkv"], default=None)
     p_pipe.add_argument("--keep-workspace", action="store_true")
+    p_pipe.add_argument("--fi", action="store_true", help="enable frame interpolation (RIFE 4.25)")
+    p_pipe.add_argument("--target-fps", type=float, default=None, help="output fps; wins over --fi-multiplier")
+    p_pipe.add_argument("--fi-multiplier", type=int, default=None, help="fps multiplier when --target-fps is unset (default x2)")
+    p_pipe.add_argument("--dedup-threshold", type=float, default=None, help="de-duplication mean-abs-diff threshold in [0,1]; 0 disables")
 
     p_dl = sub.add_parser("download-model", help="download a model from the registry")
     p_dl.add_argument("name")
@@ -72,6 +77,14 @@ def main(argv: list[str] | None = None) -> int:
             cfg.container = args.container
         if args.keep_workspace:
             cfg.keep_workspace = True
+        if args.fi or settings.fi_enabled:
+            cfg.fi_enabled = True
+        if args.target_fps is not None:
+            cfg.fi_target_fps = args.target_fps
+        if args.fi_multiplier is not None:
+            cfg.fi_multiplier = args.fi_multiplier
+        if args.dedup_threshold is not None:
+            cfg.fi_dedup_threshold = args.dedup_threshold
 
         def _emit(ev):
             d = ev.to_dict()

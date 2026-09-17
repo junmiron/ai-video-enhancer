@@ -22,7 +22,8 @@
       "backends": {"cuda": true, "tensorrt": true},
       "license": "MIT",
       "recommended_for": "default frame interpolation (all content)",
-      "notes": "Practical-RIFE 4.25 flownet.pkl - upstream's recommended default for most scenes."
+      "extract_member": "train_log/flownet.pkl",
+      "notes": "Practical-RIFE 4.25 flownet.pkl - upstream's recommended default for most scenes. The Drive link serves a zipped folder bundle; extract_member picks the checkpoint out of it."
     }
   ]
 }

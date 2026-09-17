@@ -23,6 +23,7 @@ class ModelInfo:
     license: str = ""
     recommended_for: str = ""
     notes: str = ""
+    extract_member: str | None = None  # if set, the download is an archive; this member becomes the weights file
 
 
 def default_manifest_path() -> Path:

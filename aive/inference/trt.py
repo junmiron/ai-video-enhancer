@@ -122,7 +122,11 @@ def build_engine(
 
 
 class TrtRunner:
-    """Fixed-shape TensorRT inference runner with torch-managed CUDA buffers."""
+    """Fixed-shape TensorRT inference runner with torch-managed CUDA buffers.
+
+    Supports single-input/single-output engines (``infer``) and multi-I/O
+    engines such as RIFE's img0/img1/timestep -> output (``infer_multi``).
+    """
 
     def __init__(self, engine_path: str | Path):
         import torch
@@ -162,48 +166,61 @@ class TrtRunner:
             }.get(trt_dtype, torch.float32)
             self.io[name] = {"mode": mode, "dtype": torch_dtype, "shape": shape}
 
-        inputs = [n for n in self.io if self.io[n]["mode"] == trt.TensorIOMode.INPUT]
-        outputs = [n for n in self.io if self.io[n]["mode"] == trt.TensorIOMode.OUTPUT]
-        if len(inputs) != 1 or len(outputs) != 1:
-            raise RuntimeError(f"Expected single input/output, got {inputs}/{outputs}")
-        self.in_name, self.out_name = inputs[0], outputs[0]
+        self.in_names = [n for n in self.io if self.io[n]["mode"] == trt.TensorIOMode.INPUT]
+        self.out_names = [n for n in self.io if self.io[n]["mode"] == trt.TensorIOMode.OUTPUT]
+        if not self.in_names or not self.out_names:
+            raise RuntimeError(f"Engine has no IO tensors: {list(self.io)}")
 
     def infer(self, x_nchw_f32: np.ndarray) -> np.ndarray:
-        torch = self.torch
-        trt = _trt()
-        spec_in = self.io[self.in_name]
-        spec_out = self.io[self.out_name]
+        """Single-input/single-output convenience (float output as numpy)."""
+        if len(self.in_names) != 1 or len(self.out_names) != 1:
+            raise RuntimeError("infer() needs a single-I/O engine; use infer_multi()")
+        return self.infer_multi({self.in_names[0]: x_nchw_f32})[self.out_names[0]]
 
-        in_t = torch.empty(spec_in["shape"], dtype=spec_in["dtype"], device="cuda")
-        out_t = torch.empty(spec_out["shape"], dtype=spec_out["dtype"], device="cuda")
-        in_t.copy_(torch.from_numpy(np.ascontiguousarray(x_nchw_f32)).to("cuda", non_blocking=True))
+    def infer_multi(self, inputs: dict[str, np.ndarray]) -> dict[str, np.ndarray]:
+        """Run the engine with named CPU numpy inputs; returns float32 numpy outputs."""
+        torch = self.torch
+        in_tensors = {}
+        for name in self.in_names:
+            spec = self.io[name]
+            arr = np.ascontiguousarray(inputs[name])
+            if tuple(arr.shape) != spec["shape"]:
+                raise ValueError(f"Input '{name}': expected shape {spec['shape']}, got {arr.shape}")
+            t = torch.empty(spec["shape"], dtype=spec["dtype"], device="cuda")
+            t.copy_(torch.from_numpy(arr).to("cuda", non_blocking=True))
+            in_tensors[name] = t
+        out_tensors = {
+            name: torch.empty(self.io[name]["shape"], dtype=self.io[name]["dtype"], device="cuda")
+            for name in self.out_names
+        }
 
         stream = torch.cuda.current_stream().cuda_stream
-        self.context.set_input_shape(self.in_name, spec_in["shape"])
-        in_ptr, out_ptr = in_t.data_ptr(), out_t.data_ptr()
-        if not self._execute(in_ptr, out_ptr, stream):
-            raise RuntimeError("TensorRT execute_async_v3 failed")
-        torch.cuda.synchronize()
-        return out_t.float().cpu().numpy()
-
-    def _execute(self, in_ptr: int, out_ptr: int, stream: int) -> bool:
-        """Run the context across TRT binding generations.
-
-        TRT >= 11 Python: bind tensor addresses first, then execute on a stream.
-        Older bindings accept (inputs=..., outputs=...) dicts directly.
-        """
         ctx = self.context
+        for name in self.in_names:
+            try:  # fixed-shape engines: informational, but required on some bindings
+                ctx.set_input_shape(name, tuple(self.io[name]["shape"]))
+            except Exception:  # pragma: no cover - legacy context
+                pass
+
+        ok = False
         if hasattr(ctx, "set_tensor_address"):
             try:
-                ctx.set_tensor_address(self.in_name, in_ptr)
-                ctx.set_tensor_address(self.out_name, out_ptr)
-                return bool(ctx.execute_async_v3(stream_handle=stream))
+                for name, t in in_tensors.items():
+                    ctx.set_tensor_address(name, t.data_ptr())
+                for name, t in out_tensors.items():
+                    ctx.set_tensor_address(name, t.data_ptr())
+                ok = bool(ctx.execute_async_v3(stream_handle=stream))
             except TypeError:  # pragma: no cover - mixed binding versions
-                pass
-        return bool(
-            ctx.execute_async_v3(
-                inputs={self.in_name: in_ptr},
-                outputs={self.out_name: out_ptr},
-                stream_handle=stream,
+                ok = False
+        if not ok:
+            ok = bool(
+                ctx.execute_async_v3(
+                    inputs={n: t.data_ptr() for n, t in in_tensors.items()},
+                    outputs={n: t.data_ptr() for n, t in out_tensors.items()},
+                    stream_handle=stream,
+                )
             )
-        )
+        if not ok:
+            raise RuntimeError("TensorRT execute_async_v3 failed")
+        torch.cuda.synchronize()
+        return {name: t.float().cpu().numpy() for name, t in out_tensors.items()}
