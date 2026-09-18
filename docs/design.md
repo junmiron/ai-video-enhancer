@@ -133,10 +133,10 @@ Research done against upstream repos on 2026-09-17 (links in §9). Models are **
 | Model | Best for | Why included | Backend support | License |
 |---|---|---|---|---|
 | **ShuffleCugan** (x2) | Anime — default | Current CUGAN evolution used by TAS; ONNX/TRT-ready (styler00dollar) | CUDA + TRT ✅ | verify at build |
-| **Fallin Soft / Fallin Strong** (x2) | Anime, soft vs. strong detail | renarchi/Re-SISR; popular in anime community; TRT-ready per TAS | CUDA + TRT ✅ | verify at build |
-| **SPAN** (x2) | Anime, high quality | Research SOTA for anime SR; TRT-ready per TAS | CUDA + TRT ✅ | research — verify ⚠️ |
-| **Cyte V1** (x2) | Anime | In TAS lineup, all backends | CUDA + TRT ✅ | verify at build |
-| **OpenProteus / AniScale 2** | Anime (advanced) | Sirosky/Upscale-Hub; newer community favorites | CUDA + TRT ✅ | verify at build |
+| **Fallin Soft / Fallin Strong** (x2) | Anime, soft vs. strong detail | renarchi/Re-SISR; popular in anime community; TRT-ready per TAS | CUDA + TRT ✅ | arch MIT; weights personal-use (TAS mirror) ✅ |
+| **SPAN** (x2) | Anime, high quality | Research SOTA for anime SR; TRT-ready per TAS | CUDA + TRT ✅ | arch Apache-2.0 (traiNNer-redux); Conv3XC MIT; weights personal-use (TAS mirror) ✅ |
+| **Cyte V1** (x2) | Anime | In TAS lineup, all backends | CUDA + TRT ✅ | **CC BY-NC 4.0** ⚠️ (NevermindNilas/Ai-models) — NC, marked in UI per D3 |
+| **OpenProteus / AniScale 2** | Anime (advanced) | Sirosky/Upscale-Hub; newer community favorites | CUDA + TRT ✅ | OpenProteus: arch Apache-2.0 + weights personal-use ✅ · AniScale 2 pending (not added) |
 | **RTMOSR / Saryn / Gauss** | Experimental max-quality anime | umzi2's RT/DIS-based models; behind "experimental" flag | CUDA (+TRT for most) | verify at build ⚠️ |
 | **Real-ESRGAN** (x4plus, animevideov3) | Live action & general | Battle-tested default outside anime | CUDA + TRT ✅ | BSD-3 / NC weights (OK per D3) |
 | **SAFA** (WACV 2024, RIFE team) | Live action with motion — experimental | *Temporal* video SR; built for temporal consistency → less flicker at the source | CUDA (TRT if exportable) | research — verify ⚠️ |

@@ -124,3 +124,91 @@ def test_nchw_roundtrip_matches_torch():
     t = torch.from_numpy(nchw)
     back = (t[0].permute(1, 2, 0).numpy() * 255.0)
     np.testing.assert_allclose(back, frame.astype(np.float32), atol=1e-4)
+
+
+# -- Fallin soft/strong (same UpCunet2x_fast arch as ShuffleCUGAN) ----------------
+
+
+@pytest.mark.parametrize("name", ["fallin_soft", "fallin_strong"])
+def test_fallin_forward_shape(name):
+    model = build_sr(name, device="cpu").eval()
+    x = torch.randn(1, 3, 48, 96)
+    with torch.no_grad():
+        y = model(x)
+    assert tuple(y.shape) == (1, 3, 96, 192)
+
+
+@pytest.mark.parametrize("name", ["fallin_soft", "fallin_strong"])
+def test_fallin_rejects_non_multiple_of_4(name):
+    """Same arch as ShuffleCUGAN -> same pinned size constraints."""
+    model = build_sr(name, device="cpu").eval()
+    with pytest.raises(RuntimeError):
+        with torch.no_grad():
+            model(torch.randn(1, 3, 50, 96))
+
+
+# -- SPAN (Modern Spanimation V2) -------------------------------------------------
+
+
+def test_span_forward_shape_odd_dims():
+    """All convs are 3x3 padded -> no size constraints; output is exactly 2x."""
+    model = build_sr("span_v2", device="cpu").eval()
+    for h, w in ((33, 51), (48, 96)):
+        x = torch.randn(1, 3, h, w)
+        with torch.no_grad():
+            y = model(x)
+        assert tuple(y.shape) == (1, 3, h * 2, w * 2)
+
+
+def test_span_state_dict_has_no_norm_buffer():
+    """The checkpoint carries a zero `no_norm` buffer (norm=False training);
+    the arch must expose it so loads are exact."""
+    model = build_sr("span_v2", device="cpu")
+    sd = model.state_dict()
+    assert "no_norm" in sd and tuple(sd["no_norm"].shape) == (1,)
+
+
+def test_span_fuse_matches_unfused_path():
+    """fuse() must fold sk + conv(0/1/2) into eval_conv exactly: the fused
+    eval-mode output equals the unfused training-path output."""
+    model = build_sr("span_v2", device="cpu")
+    x = torch.randn(1, 3, 48, 64)
+    with torch.no_grad():
+        y_unfused = model.train()(x)  # train mode -> conv(x_pad) + sk(x) path
+        model.eval()
+        model.fuse()
+        y_fused = model(x)
+    assert torch.allclose(y_unfused, y_fused, atol=1e-5), (
+        f"max diff {(y_unfused - y_fused).abs().max().item():.3e}"
+    )
+
+
+# -- Compact SRVGG (Cyte V1 / OpenProteus) ----------------------------------------
+
+
+@pytest.mark.parametrize("name", ["cyte_v1", "openproteus"])
+def test_compact_forward_shape_odd_dims(name):
+    model = build_sr(name, device="cpu").eval()
+    for h, w in ((33, 51), (48, 96)):
+        x = torch.randn(1, 3, h, w)
+        with torch.no_grad():
+            y = model(x)
+        assert tuple(y.shape) == (1, 3, h * 2, w * 2)
+
+
+@pytest.mark.parametrize("name", ["cyte_v1", "openproteus"])
+def test_compact_nearest_neighbor_residual(name):
+    """umzi2 variant: out = pixel_shuffle(body(x)) + nn_upsample(x). With the
+    body zeroed, the output must equal exactly the nearest-neighbor upsample."""
+    import torch.nn.functional as F
+
+    model = build_sr(name, device="cpu").eval()
+    with torch.no_grad():
+        for p in model.body.parameters():
+            p.zero_()
+        x = torch.rand(1, 3, 37, 53)
+        y = model(x)
+    expected = F.interpolate(x, scale_factor=2, mode="nearest")
+    assert torch.allclose(y, expected, atol=1e-6), (
+        f"max diff {(y - expected).abs().max().item():.3e}"
+    )

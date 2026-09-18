@@ -135,9 +135,10 @@ class SRRunner:
                 )
                 return
             model = build_sr(self.spec.name, device="cuda", dtype=None)  # fp32 export; TRT picks layer precision
-            from .sr_model import apply_sr_state, load_sr_state_dict
+            from .sr_model import apply_sr_state, finalize_sr, load_sr_state_dict
 
             apply_sr_state(model, load_sr_state_dict(weights_path))
+            finalize_sr(model)  # e.g. SPAN Conv3XC kernel fusion before export
             SRExportWrapper.export(model, self.spec, onnx_path, self.engine_h, self.engine_w)
             del model
             import torch

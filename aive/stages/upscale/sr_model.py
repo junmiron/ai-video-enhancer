@@ -1,11 +1,18 @@
 """Super-resolution model registry, loading and ONNX export (M3).
 
-Two model families ship in M3:
+Model families:
 
 * ``shufflecugan_x2`` — ShuffleCUGAN x2 (UpCunet2x_fast), the anime default.
   Tiny (1.4M params); input dims must be multiples of 4 and >= 40.
 * ``realesrgan_x4plus`` — Real-ESRGAN x4plus (RRDBNet, 16.7M params), the
   live-action / general default; no size constraints.
+* ``fallin_soft`` / ``fallin_strong`` — Fallin x2 (same UpCunet2x_fast arch as
+  ShuffleCUGAN, different weights); same size constraints.
+* ``span_v2`` — Modern Spanimation V2 (SPAN: Conv3XC + SPAB blocks, 48ch),
+  trained with norm=False; no size constraints. Needs a one-time kernel fusion
+  after load (:func:`finalize_sr`).
+* ``cyte_v1`` / ``openproteus`` — umzi2 compact SRVGG (Conv+PReLU stack +
+  PixelShuffle + nearest-neighbor residual); no size constraints.
 
 Both are loaded through a non-strict state-dict load that is *fatal on missing
 inference keys* (same pattern as :func:`aive.stages.interpolate.rife_model.apply_rife_state`):
@@ -26,7 +33,15 @@ log = logging.getLogger(__name__)
 
 
 # Registry names for SR models (manifest `task: sr`).
-SR_MODELS = ("shufflecugan_x2", "realesrgan_x4plus")
+SR_MODELS = (
+    "shufflecugan_x2",
+    "realesrgan_x4plus",
+    "fallin_soft",
+    "fallin_strong",
+    "span_v2",
+    "cyte_v1",
+    "openproteus",
+)
 
 
 @dataclass(frozen=True)
@@ -47,6 +62,24 @@ SPECS: dict[str, SRModelSpec] = {
     "realesrgan_x4plus": SRModelSpec(
         name="realesrgan_x4plus", scale=4, pad_mod=1, min_dim=0, bytes_per_pixel=2500.0
     ),
+    # Fallin: identical arch to ShuffleCUGAN (UpCunet2x_fast) -> same constraints.
+    "fallin_soft": SRModelSpec(
+        name="fallin_soft", scale=2, pad_mod=4, min_dim=40, bytes_per_pixel=600.0
+    ),
+    "fallin_strong": SRModelSpec(
+        name="fallin_strong", scale=2, pad_mod=4, min_dim=40, bytes_per_pixel=600.0
+    ),
+    # SPAN: all 3x3 padded convs at full res (48ch) + one 192ch cat map.
+    "span_v2": SRModelSpec(
+        name="span_v2", scale=2, pad_mod=1, min_dim=0, bytes_per_pixel=1000.0
+    ),
+    # Compact SRVGG: full-res conv stack; 24ch (Cyte) / 64ch (OpenProteus).
+    "cyte_v1": SRModelSpec(
+        name="cyte_v1", scale=2, pad_mod=1, min_dim=0, bytes_per_pixel=500.0
+    ),
+    "openproteus": SRModelSpec(
+        name="openproteus", scale=2, pad_mod=1, min_dim=0, bytes_per_pixel=1000.0
+    ),
 }
 
 
@@ -58,14 +91,30 @@ def spec_for(name: str) -> SRModelSpec:
 
 def build_sr(name: str, device: str = "cuda", dtype=None):
     """Construct a fresh SR model for `name` (weights NOT loaded)."""
-    if name == "shufflecugan_x2":
+    if name in ("shufflecugan_x2", "fallin_soft", "fallin_strong"):
         from ._cugan_arch import UpCunet2x_fast
 
+        # Fallin soft/strong are the same CUGAN-family arch as ShuffleCUGAN,
+        # trained with different weights (verified: identical key layout).
         model = UpCunet2x_fast(in_channels=3, out_channels=3)
     elif name == "realesrgan_x4plus":
         from ._rrdbnet_arch import RRDBNet
 
         model = RRDBNet(num_in_ch=3, num_out_ch=3, scale=4, num_feat=64, num_block=23, num_grow_ch=32)
+    elif name == "span_v2":
+        from ._span_arch import SPAN
+
+        model = SPAN(num_in_ch=3, num_out_ch=3, feature_channels=48, upscale=2)
+    elif name in ("cyte_v1", "openproteus"):
+        from ._compact_arch import SRVGGNetCompact
+
+        # Pinned to the checkpoint layouts (body module counts verified):
+        # Cyte V1 SuperUltraCompact = feat 24 / 8 conv pairs; OpenProteus
+        # Compact i2 70K = feat 64 / 16 conv pairs.
+        if name == "cyte_v1":
+            model = SRVGGNetCompact(num_in_ch=3, num_out_ch=3, num_feat=24, num_conv=8, upscale=2)
+        else:
+            model = SRVGGNetCompact(num_in_ch=3, num_out_ch=3, num_feat=64, num_conv=16, upscale=2)
     else:
         raise ValueError(f"Unknown SR model '{name}'. Known: {list(SPECS)}")
     if dtype is not None:
@@ -118,11 +167,24 @@ def apply_sr_state(model, state: dict) -> None:
         )
 
 
+def finalize_sr(model) -> None:
+    """Post-load finalization for archs that need it.
+
+    SPAN ships unfused Conv3XC branches (sk + 1x1/3x3/1x1); the checkpoint's
+    cached eval_conv may be stale, so re-fuse from conv/sk once after loading.
+    Idempotent and a no-op for archs without a ``fuse`` method.
+    """
+    fuse = getattr(model, "fuse", None)
+    if callable(fuse):
+        fuse()
+
+
 def load_sr(name: str, weights_path: str | Path, device: str = "cuda", dtype=None):
     """Load SR model `name` from a checkpoint file."""
     model = build_sr(name, device=device, dtype=dtype)
     state = load_sr_state_dict(weights_path)
     apply_sr_state(model, state)
+    finalize_sr(model)
     del state
     log.info("Loaded %s weights from %s", name, weights_path)
     return model

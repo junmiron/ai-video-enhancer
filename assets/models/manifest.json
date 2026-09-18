@@ -25,6 +25,66 @@
       "notes": "Battle-tested x4 SR + denoise. Weights are NC-licensed: OK for personal use per project decision D3."
     },
     {
+      "name": "fallin_soft",
+      "task": "sr",
+      "version": "V1 (TAS mirror)",
+      "urls": ["https://github.com/NevermindNilas/TAS-Models-Host/releases/download/main/Fallin_soft.pth"],
+      "sha256": "910aa56a9a1187df97c3284177da1bc66836679350b2613191340734937e9960",
+      "min_vram_gb": 2,
+      "backends": {"cuda": true, "tensorrt": true},
+      "license": "arch MIT (bilibili Real-CUGAN family); weights personal use (TAS mirror)",
+      "recommended_for": "anime x2 - softer detail retention",
+      "notes": "Fallin soft: same UpCunet2x_fast arch as ShuffleCUGAN (1.4M params), different weights; input dims must be multiples of 4 and >= 40, the stage pads automatically. Same file TAS's registry points at."
+    },
+    {
+      "name": "fallin_strong",
+      "task": "sr",
+      "version": "V1 (TAS mirror)",
+      "urls": ["https://github.com/NevermindNilas/TAS-Models-Host/releases/download/main/Fallin_strong.pth"],
+      "sha256": "14b8415199aa66a6507725408a66758ba2bff9286736f19f7f07524efd821a56",
+      "min_vram_gb": 2,
+      "backends": {"cuda": true, "tensorrt": true},
+      "license": "arch MIT (bilibili Real-CUGAN family); weights personal use (TAS mirror)",
+      "recommended_for": "anime x2 - stronger detail/sharpness",
+      "notes": "Fallin strong: same UpCunet2x_fast arch as ShuffleCUGAN (1.4M params), different weights; input dims must be multiples of 4 and >= 40, the stage pads automatically. Same file TAS's registry points at."
+    },
+    {
+      "name": "span_v2",
+      "task": "sr",
+      "version": "Modern Spanimation V2 (TAS mirror)",
+      "urls": ["https://github.com/NevermindNilas/TAS-Models-Host/releases/download/main/2x_ModernSpanimationV2.pth"],
+      "sha256": "a13ae9fd8a72d0d320759472e4097eb58483c2ecc6232dec35b971e97275554c",
+      "min_vram_gb": 4,
+      "backends": {"cuda": true, "tensorrt": true},
+      "license": "arch Apache-2.0 (umzi2/traiNNer-redux; Conv3XC from TArdelean/DynamicConvolution MIT); weights personal use (TAS mirror)",
+      "recommended_for": "anime x2 - SPAN family, higher quality than CUGAN-class models",
+      "notes": "SPAN arch (2.2M params): 20 reparameterizable Conv3XC blocks + sigmoid-gated SPAB attention; trained with norm=False (no input normalization). Kernel fusion runs once after load. No size constraints."
+    },
+    {
+      "name": "cyte_v1",
+      "task": "sr",
+      "version": "V1 SuperUltraCompact",
+      "urls": ["https://raw.githubusercontent.com/NevermindNilas/Ai-models/main/Cyte-V1-SuperUltraCompact/2x-Cyte-V1-SuperUltraCompact.pth"],
+      "sha256": "d4eea1e072f74f42e864d8a76e10a3df48b5f996f4f9db0a613799455a1d86f8",
+      "min_vram_gb": 1,
+      "backends": {"cuda": true, "tensorrt": true},
+      "license": "arch Apache-2.0 (BasicSR family); weights CC BY-NC 4.0 (NevermindNilas/Ai-models) - NON-COMMERCIAL only ⚠️",
+      "recommended_for": "anime x2 - ultra-light compact model, fastest of the lineup",
+      "notes": "Cyte V1 SuperUltraCompact (0.05M params): umzi2 compact SRVGG (Conv+PReLU stack + PixelShuffle + nearest-neighbor residual). Weights are CC BY-NC 4.0: OK for personal use per project decision D3, must stay marked NC in the UI model list. Hosted on NevermindNilas/Ai-models (raw.githubusercontent), not TAS-Models-Host - same special-case host TAS's own downloader uses."
+    },
+    {
+      "name": "openproteus",
+      "task": "sr",
+      "version": "Compact i2 70K (TAS mirror)",
+      "urls": ["https://github.com/NevermindNilas/TAS-Models-Host/releases/download/main/2x_OpenProteus_Compact_i2_70K.pth"],
+      "sha256": "a943566242a830ace576b768921a63ddde2baf826b90712e869d937603008708",
+      "min_vram_gb": 2,
+      "backends": {"cuda": true, "tensorrt": true},
+      "license": "arch Apache-2.0 (umzi2/traiNNer-redux); weights personal use (TAS mirror)",
+      "recommended_for": "anime x2 - compact model with a good speed/quality balance",
+      "notes": "OpenProteus Compact i2 70K (0.6M params): umzi2 compact SRVGG (Conv+PReLU stack + PixelShuffle + nearest-neighbor residual). No size constraints."
+    },
+    {
       "name": "rife_425",
       "task": "fi",
       "version": "4.25",
