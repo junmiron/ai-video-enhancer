@@ -61,6 +61,14 @@ class PipelineConfig:
     sr_model: str = "shufflecugan_x2"  # registry name (task=sr)
     sr_scale: int | None = None  # target output scale; None -> model's native scale
 
+    # Artifact QA / restore (M4) — design.md §4.4 user controls
+    qa_enabled: bool = True
+    qa_mode: str = "auto"  # auto | detect_only | manual
+    qa_proxy_height: int = 720
+    qa_window_size: int = 7
+    qa_min_severity: float = 0.15
+    qa_sensitivity: float = 0.5
+
     @classmethod
     def from_settings(cls, s: Settings) -> "PipelineConfig":
         return cls(
@@ -78,6 +86,12 @@ class PipelineConfig:
             sr_enabled=s.sr_enabled,
             sr_model=s.sr_model,
             sr_scale=s.sr_scale,
+            qa_enabled=s.qa_enabled,
+            qa_mode=s.qa_mode,
+            qa_proxy_height=s.qa_proxy_height,
+            qa_window_size=s.qa_window_size,
+            qa_min_severity=s.qa_min_severity,
+            qa_sensitivity=s.qa_sensitivity,
         )
 
     def interpolate_config(self):
@@ -101,6 +115,23 @@ class PipelineConfig:
         from ..stages.upscale.stage import UpscaleConfig  # lazy: pulls torch deps
 
         return UpscaleConfig(enabled=True, model=self.sr_model, scale=self.sr_scale)
+
+    def qa_config(self):
+        """QAConfig for this pipeline, or None when QA is disabled."""
+        if not self.qa_enabled:
+            return None
+        from ..stages.qa.findings import ArtifactType  # cheap (no cv2/torch)
+        from ..stages.qa.stage import QAConfig  # lazy: pulls cv2 deps
+
+        sens = {a.value: float(self.qa_sensitivity) for a in ArtifactType.all()}
+        return QAConfig(
+            enabled=True,
+            mode=self.qa_mode,
+            proxy_height=self.qa_proxy_height,
+            window_size=self.qa_window_size,
+            min_severity=self.qa_min_severity,
+            sensitivity=sens,
+        )
 
     # Fields that do NOT affect lossless segment-chunk content (final-encode / UX only).
     _NON_CONTENT_FIELDS = frozenset({"output_codec", "crf", "container", "audio_passthrough", "keep_workspace"})
@@ -130,6 +161,9 @@ class StageContext:
     start_frame: int = 0
     end_frame: int = 0
     settings: dict = field(default_factory=dict)
+    # M4 QA ground-truth access (optional; default None keeps earlier stages unchanged).
+    input_path: str | None = None  # source path so QA can decode proxy refs for detection
+    expected_out_frames: int | None = None  # processed-frame count for this segment
 
 
 class Stage:
@@ -190,7 +224,11 @@ def build_stage_chain(cfg: PipelineConfig) -> list[Stage]:
         from ..stages.upscale.stage import UpscaleStage  # lazy: pulls torch deps
 
         stages.append(UpscaleStage(sr_cfg))
-    # M4+: QAStage appended here.
+    qa_cfg = cfg.qa_config()
+    if qa_cfg is not None:
+        from ..stages.qa.stage import QAStage  # lazy: pulls cv2 deps
+
+        stages.append(QAStage(qa_cfg))
     return stages or [IdentityStage()]
 
 
@@ -263,6 +301,7 @@ def run_pipeline(
         num = den = 1
 
     stages = build_stage_chain(cfg)
+    qa_stage = next((s for s in stages if getattr(s, "name", "") == "qa"), None)
 
     # Final frame dimensions: fold the declarative output_dims over the chain.
     out_w, out_h = info.width, info.height
@@ -291,7 +330,11 @@ def run_pipeline(
             log.info("Segment %d/%d frames [%d:%d]", seg.index + 1, len(segments), seg.start_frame, seg.end_frame)
 
             raw = decode_frames(input_path, start_frame=seg.start_frame, count=seg.frame_count)
-            ctx = StageContext(info.width, info.height, info.fps, seg.index, seg.start_frame, seg.end_frame)
+            ctx = StageContext(
+                info.width, info.height, info.fps, seg.index, seg.start_frame, seg.end_frame,
+                input_path=input_path,
+                expected_out_frames=seg_out_counts[seg.index],
+            )
             stream: Iterator[np.ndarray] = raw
             for st in stages:
                 stream = st.process(stream, ctx)
@@ -352,5 +395,19 @@ def run_pipeline(
         "output_height": out_h,
         "report": None,  # M4 fills in the artifact report
     }
-    _emit(JobFinished(ok=True, output_path=output_path, elapsed_s=result["elapsed_s"], report=None))
+
+    # Collect the artifact-QA report (M4) if a QA stage ran.
+    report_dict = None
+    if qa_stage is not None and getattr(qa_stage, "report", None) is not None:
+        qa_stage.report.output_path = str(output_path)
+        report_dict = qa_stage.report.to_dict()
+        try:
+            from ..stages.qa.report import save_report
+
+            saved = save_report(qa_stage.report, workspaces_dir() / job_id, base_name="artifact-report")
+            log.info("Artifact report written: %s", saved)
+        except Exception as exc:  # never fail the job over a report export
+            log.warning("Failed to write artifact report files: %s", exc)
+    result["report"] = report_dict
+    _emit(JobFinished(ok=True, output_path=output_path, elapsed_s=result["elapsed_s"], report=report_dict))
     return result

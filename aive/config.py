@@ -46,6 +46,14 @@ class Settings:
     sr_model: str = "shufflecugan_x2"  # registry name (task=sr)
     sr_scale: int | None = None  # target output scale; None -> model's native scale
 
+    # Artifact QA / restore (M4) — design.md §4.4 user controls
+    qa_enabled: bool = True
+    qa_mode: str = "auto"  # auto | detect_only | manual
+    qa_proxy_height: int = 720  # detector resolution target (§4.5 proxy-first)
+    qa_window_size: int = 7  # temporal window for detectors/repairs (kept odd)
+    qa_min_severity: float = 0.15  # record a finding only at/above this severity
+    qa_sensitivity: float = 0.5  # global default per-artifact sensitivity in [0,1]
+
     log_level: str = "INFO"
 
 
