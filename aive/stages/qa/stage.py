@@ -40,6 +40,7 @@ class QAConfig:
     proxy_height: int = 720  # detector resolution target (design.md §4.5)
     window_size: int = 7  # temporal frames for detectors/repairs (kept odd)
     min_severity: float = 0.15  # record a finding only at/above this severity
+    ai_repairs: bool = True  # allow AI-model repairs (SCUNet / deepDeband-f); CV fallback when off
 
     # Per-artifact sensitivity in [0,1] and enable flag (design.md §4.4). Defaults
     # are uniform; the M6 UI exposes per-artifact sliders that override these.
@@ -238,6 +239,7 @@ class QAStage:
                         center_idx=center_pos,
                         scene_ref_proxy=scene_ref,
                         center_proxy=center_proxy,
+                        ai_repairs=cfg.ai_repairs,
                     )
                     new_frame, method = run_repair(art, rctx)
                     if method != "none":

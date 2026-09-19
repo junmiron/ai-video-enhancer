@@ -172,6 +172,30 @@
       "recommended_for": "experimental: SOTA large-motion interpolation; also the planned ghost-repair alternate model (M4)",
       "experimental": true,
       "notes": "AMT-SICDIA (Adaptive Motion Transformer). Public weights URL not located as of 2026-09-17; confirm at adapter time. Adapter not yet implemented."
+    },
+    {
+      "name": "scunet",
+      "task": "restore",
+      "version": "color-real-psnr v1.0 (TAS mirror)",
+      "urls": ["https://github.com/NevermindNilas/TAS-Models-Host/releases/download/main/scunet_color_real_psnr.pth"],
+      "sha256": "fa78899ba2caec9d235a900e91d96c689da71c42029230c2028b00f09f809c2e",
+      "min_vram_gb": 8,
+      "backends": {"cuda": true, "tensorrt": true},
+      "license": "arch Apache-2.0 (cszn/SCUNet); weights personal use (TAS mirror of KAIR v1.0)",
+      "recommended_for": "AI flicker/noise repair in the artifact-QA stage",
+      "notes": "Swin-Conv-UNet blind denoiser, color-real-psnr checkpoint (17.95M params; config=[4]*7 verified strict against this file — NOT the class default [2]*7). Input is internally padded to a multiple of 64; output is the full denoised image in [0,1] with no residual add. The QA flicker repair runs it per frame on flagged static regions as a stabilizing pass (deterministic denoise of near-constant inputs collapses temporal variance)."
+    },
+    {
+      "name": "deepdeband_f",
+      "task": "restore",
+      "version": "f (TAS mirror)",
+      "urls": ["https://github.com/NevermindNilas/TAS-Models-Host/releases/download/main/deepdeband_f.pth"],
+      "sha256": "d08eb72299a688c81205b51e9ad54e8b55577e410bc6e14fd05f8267a116bfdf",
+      "min_vram_gb": 8,
+      "backends": {"cuda": true, "tensorrt": true},
+      "license": "arch BSD-3 (pytorch-CycleGAN-and-pix2pix) + MIT (RaymondLZhou/deepDeband); weights personal use (TAS mirror)",
+      "recommended_for": "AI banding repair in the artifact-QA stage",
+      "notes": "pix2pix unet_256 generator (8 downsamplings, ngf=64, BatchNorm; 54.4M params). The checkpoint is a plain UnetGenerator256 state dict ('model.*' keys) — the loader remaps it onto the wrapper's .net attribute. Input dims must be multiples of 256 (the wrapper reflect-pads internally); [-1,1] range mapping lives inside the wrapper. Heavier per pixel than SR models at 4K: expect the tiled-inference path to engage when other processes hold VRAM."
     }
   ]
 }

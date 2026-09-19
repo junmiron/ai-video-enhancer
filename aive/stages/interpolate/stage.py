@@ -129,7 +129,9 @@ class RIFERunner:
             out = self._run_trt(img0, img1, t)
         else:
             out = self._run_torch(img0, img1, t)
-        return np.clip(np.round(out), 0, 255).astype(np.uint8)
+        # Model output is [0,1] (convex blend of the normalized inputs) — scale
+        # to uint8 before rounding; rounding without *255 binarizes the frame.
+        return np.clip(np.round(out * 255.0), 0, 255).astype(np.uint8)
 
     def _pad(self, frame_hwc_u8: np.ndarray) -> "np.ndarray | object":
         """HWC uint8 [h,w] -> NCHW float32 [0,1] padded to (ph,pw), zero border."""

@@ -68,6 +68,7 @@ class PipelineConfig:
     qa_window_size: int = 7
     qa_min_severity: float = 0.15
     qa_sensitivity: float = 0.5
+    qa_ai_repairs: bool = True
 
     @classmethod
     def from_settings(cls, s: Settings) -> "PipelineConfig":
@@ -92,6 +93,7 @@ class PipelineConfig:
             qa_window_size=s.qa_window_size,
             qa_min_severity=s.qa_min_severity,
             qa_sensitivity=s.qa_sensitivity,
+            qa_ai_repairs=s.qa_ai_repairs,
         )
 
     def interpolate_config(self):
@@ -126,6 +128,7 @@ class PipelineConfig:
         sens = {a.value: float(self.qa_sensitivity) for a in ArtifactType.all()}
         return QAConfig(
             enabled=True,
+            ai_repairs=self.qa_ai_repairs,
             mode=self.qa_mode,
             proxy_height=self.qa_proxy_height,
             window_size=self.qa_window_size,

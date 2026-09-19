@@ -53,6 +53,7 @@ class Settings:
     qa_window_size: int = 7  # temporal window for detectors/repairs (kept odd)
     qa_min_severity: float = 0.15  # record a finding only at/above this severity
     qa_sensitivity: float = 0.5  # global default per-artifact sensitivity in [0,1]
+    qa_ai_repairs: bool = True  # AI-model repairs (SCUNet / deepDeband-f); CV fallback when off/unavailable
 
     log_level: str = "INFO"
 

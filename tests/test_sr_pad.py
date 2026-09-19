@@ -1,8 +1,13 @@
 """CPU tests for SRRunner._pad_to_engine (pure numpy; no GPU needed).
 
-Regression: padding once replicated each edge by the FULL deficit, producing
-engine_h + deficit rows instead of engine_h — only visible when a region is
-strictly smaller than the engine (tiled mode / non-matching frame dims).
+Regression history:
+* Padding once replicated each edge by the FULL deficit, producing
+  engine_h + deficit rows instead of engine_h — only visible when a region is
+  strictly smaller than the engine (tiled mode / non-matching frame dims).
+* It then CENTERED the content while both consumers (_run_full_frame and
+  _run_tiled) crop from the top-left corner, silently shifting every padded
+  region by deficit//2 px. Padding must keep content at [0,0] and fill only
+  bottom/right — see test_sr_runner_identity.py for end-to-end coverage.
 """
 from __future__ import annotations
 
@@ -37,23 +42,18 @@ def test_pad_to_engine_exact_size(rh, rw, eh, ew):
     assert out.shape == (1, 3, eh, ew)
 
 
-def test_pad_content_preserved_and_edges_replicated():
+def test_pad_content_at_origin_and_bottom_right_replicated():
     region = _region(160, 128)
     out = _pad(192, 192, region)
-    # The original content sits centered: deficit split top/bottom and left/right.
-    dh_top = (192 - 160) // 2          # 16
-    dw_left = (192 - 128) // 2         # 32
-    core = out[:, :, dh_top:dh_top + 160, dw_left:dw_left + 128]
-    np.testing.assert_array_equal(core, region)
-    # Replicated edges match the border rows/cols.
-    np.testing.assert_array_equal(out[:, :, 0], out[:, :, dh_top])          # top = first row
-    np.testing.assert_array_equal(out[:, :, -1], out[:, :, dh_top + 159])   # bottom = last row
-    np.testing.assert_array_equal(out[:, :, :, 0], out[:, :, :, dw_left])   # left = first col
-    np.testing.assert_array_equal(out[:, :, :, -1], out[:, :, :, dw_left + 127])
+    # Content stays at [0,0]; the deficit is filled on bottom/right only.
+    np.testing.assert_array_equal(out[:, :, :160, :128], region)
+    # Replicated edges match the border rows/cols of the content.
+    np.testing.assert_array_equal(out[:, :, 191], out[:, :, 159])          # bottom = last row
+    np.testing.assert_array_equal(out[:, :, :, 191], out[:, :, :, 127])    # right = last col
 
 
 def test_pad_odd_deficit_still_exact():
-    # Deficit 33 (odd): split 16/17, total still exactly the engine size.
+    # Deficit 33 (odd): all of it goes to the bottom/right, total still exact.
     out = _pad(193, 193, _region(160, 160))
     assert out.shape == (1, 3, 193, 193)
 

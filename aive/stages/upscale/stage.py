@@ -156,7 +156,9 @@ class SRRunner:
             out = self._run_full_frame(frame_hwc_u8)
         else:
             out = self._run_tiled(frame_hwc_u8)
-        return np.clip(np.round(out), 0, 255).astype(np.uint8)
+        # Model output is [0,1] (sigmoid/tanh-normalized) — scale to uint8
+        # before rounding; rounding without *255 binarizes the frame.
+        return np.clip(np.round(out * 255.0), 0, 255).astype(np.uint8)
 
     def _to_nchw(self, frame_hwc_u8: np.ndarray) -> np.ndarray:
         f = frame_hwc_u8.astype(np.float32) / 255.0
@@ -165,8 +167,12 @@ class SRRunner:
     def _pad_to_engine(self, region_nchw: np.ndarray) -> np.ndarray:
         """Edge-pad (or pass through) a NCHW region to the fixed engine size.
 
-        Edge replication keeps padded pixels plausible context for models with
-        global ops (SE blocks); the padded area is never used in the output.
+        Content is kept at [0,0]; the deficit is padded on bottom/right only
+        with edge replication. Both consumers crop from the top-left corner
+        (full-frame ``[:h, :w]`` and tile cover offsets), so centered padding
+        would silently shift every padded region — see test_sr_pad.py.
+        The padded area is never used in the output; replicated edges just keep
+        it plausible context for models with global ops (SE blocks).
         """
         _, _, rh, rw = region_nchw.shape
         if rh == self.engine_h and rw == self.engine_w:
@@ -174,30 +180,16 @@ class SRRunner:
         take_h = min(rh, self.engine_h)
         take_w = min(rw, self.engine_w)
         core = region_nchw[:, :, :take_h, :take_w]
-        # Split the deficit across both sides so the result is EXACTLY engine
-        # size (padding one side by the full deficit would overshoot).
         dh = self.engine_h - take_h
         if dh > 0:
-            top_n = dh // 2
-            bottom_n = dh - top_n
             core = np.concatenate(
-                [
-                    np.repeat(core[:, :, 0:1], top_n, axis=2),
-                    core,
-                    np.repeat(core[:, :, -1:], bottom_n, axis=2),
-                ],
+                [core, np.repeat(core[:, :, -1:], dh, axis=2)],
                 axis=2,
             )
         dw = self.engine_w - take_w
         if dw > 0:
-            left_n = dw // 2
-            right_n = dw - left_n
             core = np.concatenate(
-                [
-                    np.repeat(core[:, :, :, 0:1], left_n, axis=3),
-                    core,
-                    np.repeat(core[:, :, :, -1:], right_n, axis=3),
-                ],
+                [core, np.repeat(core[:, :, :, -1:], dw, axis=3)],
                 axis=3,
             )
         return core

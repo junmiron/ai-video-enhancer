@@ -109,14 +109,16 @@ def test_halo_repair_softens_flagged_region_only():
     assert np.array_equal(out[0:5, 0:5], frame[0:5, 0:5])
 
 
-def test_lineart_repair_returns_valid_sharpened_output():
+def test_lineart_repair_returns_valid_darkened_output():
     rng = np.random.default_rng(3)
     frame = (rng.integers(0, 255, size=(48, 64, 3))).astype(np.uint8)
     mask = np.zeros((48, 64), dtype=np.float32)
     mask[10:30, 20:40] = 1.0
     ctx = RepairContext(frame=frame, mask=mask, window=[frame.copy() for _ in range(7)], center_idx=3)
     out, method = repair(ArtifactType.LINEART, ctx)
-    assert method == "line-enhance" and out.dtype == np.uint8 and out.shape == frame.shape
+    assert method == "fastlinedarken" and out.dtype == np.uint8 and out.shape == frame.shape
+    # targeted: pixels outside the mask are untouched
+    assert np.array_equal(out[0:5, 0:5], frame[0:5, 0:5])
 
 
 def test_color_repair_matches_scene_palette():

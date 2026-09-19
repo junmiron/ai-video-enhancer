@@ -6,6 +6,21 @@ import subprocess
 import pytest
 
 
+@pytest.fixture(autouse=True)
+def _no_ai_restore_runners(monkeypatch):
+    """Keep the default suite GPU- and weight-free (M4.x).
+
+    AI restore runners (SCUNet / deepDeband-f) auto-download weights and build
+    engines on first use; tests that construct RepairContext with the default
+    ``ai_repairs=True`` must not trigger that. Wiring tests monkeypatch
+    ``get_restore_runner`` themselves (their patch wins over this one); real-
+    model validation is manual (docs/plan.md, M4.x entry).
+    """
+    from aive.stages.qa.repairs import ai as _ai
+
+    monkeypatch.setattr(_ai, "get_restore_runner", lambda *a, **k: None)
+
+
 def _run(cmd: list[str]) -> None:
     proc = subprocess.run(cmd, capture_output=True, text=True)
     if proc.returncode != 0:

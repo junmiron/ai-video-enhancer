@@ -106,7 +106,7 @@ Each detector emits **findings**: `(segment, frame range, region mask, artifact 
 
 | Artifact | Repair policy (in priority order) |
 |---|---|
-| Flicker | 1) Masked temporal smoothing: weighted median blend across time **only inside flagged regions** (motion edges excluded by flow mask). 2) If still above threshold: re-run the segment through a denoise model (**SCUNet**, TensorRT) as a stabilizing pass. |
+| Flicker | 1) **SCUNet** blind-denoise pass on flagged regions (TensorRT): independent per-frame denoising collapses temporal variance in static regions, where each frame differs only by SR hallucination noise. 2) Fallback: masked temporal smoothing — weighted median blend across time **only inside flagged regions** (motion edges excluded by flow mask). |
 | Ghosting | 1) Region-wise blend toward the temporally closer source frame (per-pixel weight from similarity). 2) Re-interpolate flagged sub-segments with the alternate RIFE variant (e.g., 4.25 ↔ 4.25-heavy / lite) or reduced multiplier locally. |
 | Banding | 1) **deepDeband-f** AI debanding model on flagged regions (TAS-proven). 2) Fallback: classical Deband-style filter + fine dither on smooth regions only. |
 | Halo/ringing | Local edge softening: unsharp rollback proportional to measured overshoot, confined to flagged edges; never global blur. |

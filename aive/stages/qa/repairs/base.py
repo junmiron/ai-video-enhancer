@@ -6,10 +6,12 @@ the fix applied (or ``"none"`` when it could not act). Repairs are *targeted* â€
 they only touch pixels inside the detector's region mask (upsampled to full res),
 never a global filter, so good areas are left alone.
 
-The CV path is always available and works without any model; AI-model repairs
-(deepDeband-f / SCUNet / FastLineDarken) plug in behind the same interface later
-and fall back to these when their weights/engine are unavailable (mirrors how M3.x
-handled experimental additions).
+The CV path is always available and works without any model. AI-model repairs
+(deepDeband-f for banding, SCUNet for flicker) run first when ``ai_repairs``
+is enabled and their runner is available (weights auto-download on first use,
+see :mod:`aive.stages.qa.repairs.ai`), falling back to the CV fix otherwise.
+The line-art repair uses FastLineDarken â€” an exact OpenCV port of TAS's fixed
+conv pipeline, always available without any model (:mod:`fastlinedarken`).
 """
 from __future__ import annotations
 
@@ -36,6 +38,7 @@ class RepairContext:
     center_idx: int = 0  # index of `frame` within `window`
     scene_ref_proxy: np.ndarray | None = None  # [h,w,3] float [0,1] proxy scene reference (color drift)
     center_proxy: np.ndarray | None = None  # [h,w,3] float [0,1] proxy of the center frame
+    ai_repairs: bool = True  # allow AI-model repairs (SCUNet / deepDeband-f); CV fallback when off
 
 
 def _bbox(mask: np.ndarray, thresh: float = 0.05) -> tuple[int, int, int, int] | None:

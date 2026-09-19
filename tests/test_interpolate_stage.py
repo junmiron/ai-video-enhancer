@@ -161,6 +161,12 @@ def test_rife_variants_torch_sanity(variant):
     # The interpolated frame must differ from both endpoints (real motion synthesis).
     assert not np.array_equal(out, frames[0])
     assert not np.array_equal(out, frames[2])
+    # Regression: __call__ must scale the [0,1] model output to uint8 — rounding
+    # without *255 produced binary {0,1} frames that still passed the checks above.
+    assert out.max() > 200 and len(np.unique(out)) > 4, (
+        f"interpolated frame lacks dynamic range (max={out.max()}, "
+        f"unique={len(np.unique(out))}) — check [0,1] -> uint8 scaling"
+    )
 
 
 @pytest.mark.gpu
@@ -184,4 +190,8 @@ def test_rife_trt_engine_tiny_shape():
 
     assert out_trt.shape == (64, 96, 3) and out_trt.dtype == np.uint8
     diff = np.abs(out_trt.astype(np.int16) - out_ref.astype(np.int16))
-    assert diff.max() <= 4, f"TRT vs torch max abs diff {diff.max()} (mean {diff.mean():.3f})"
+    # fp16 TRT vs fp16 torch: ~0.04 in [0,1] at high-contrast edges -> a few
+    # gray levels after *255; the frame as a whole must be near-identical.
+    assert diff.max() <= 16 and diff.mean() < 2.0, (
+        f"TRT vs torch max abs diff {diff.max()} (mean {diff.mean():.3f})"
+    )
