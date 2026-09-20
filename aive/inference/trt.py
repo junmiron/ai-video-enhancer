@@ -125,6 +125,7 @@ def build_engine(
     engine_out: str | Path,
     precision: str = "fp16",
     workspace_bytes: int | None = None,
+    profiles: dict[str, tuple[int, ...], tuple[int, ...], tuple[int, ...]] | None = None,
 ) -> Path:
     """Build a serialized TensorRT engine from an ONNX file.
 
@@ -134,6 +135,10 @@ def build_engine(
     ``workspace_bytes=None`` adapts to current free VRAM: up to 4 GiB, but no
     more than half of what is actually free — a fixed 4 GiB pool makes the
     build OOM when other processes (e.g. an LLM server) hold most of the GPU.
+
+    ``profiles`` optionally declares dynamic input shapes as
+    ``{input_name: (min_shape, opt_shape, max_shape)}`` — used by the depth
+    streaming engines whose view count varies per chunk (full window vs tail).
     """
     trt = _trt()
     logger = trt.Logger(trt.Logger.WARNING)
@@ -154,6 +159,11 @@ def build_engine(
             raise RuntimeError(f"ONNX parse failed: {errors}")
         if prec == "fp16":
             _enable_fp16(config, network, trt)
+        if profiles:
+            profile = builder.create_optimization_profile()
+            for name, (min_s, opt_s, max_s) in profiles.items():
+                profile.set_shape(name, min_s, opt_s, max_s)
+            config.add_optimization_profile(profile)
         t0 = time.time()
         engine_bytes = builder.build_serialized_network(network, config)
         if engine_bytes is None:
@@ -279,5 +289,60 @@ class TrtRunner:
             )
         if not ok:
             raise RuntimeError("TensorRT execute_async_v3 failed")
+        torch.cuda.synchronize()
+        return {name: t.float().cpu().numpy() for name, t in out_tensors.items()}
+
+    def infer_dynamic(self, inputs: dict[str, np.ndarray]) -> dict[str, np.ndarray]:
+        """Run a dynamic-shape engine (built with ``profiles``).
+
+        Input shapes may vary per call within the declared min..max profile;
+        output buffers are re-derived from the context after each shape set.
+        Fixed-shape engines work too (shapes just never change).
+        """
+        torch = self.torch
+        ctx = self.context
+        in_tensors = {}
+        for name in self.in_names:
+            arr = np.ascontiguousarray(inputs[name])
+            spec = self.io[name]
+            if not all(
+                a == b or (isinstance(b, int) and a >= 1)
+                for a, b in zip(arr.shape, spec["shape"])
+            ):
+                raise ValueError(f"Input '{name}': shape {arr.shape} incompatible with engine dims")
+            if not ctx.set_input_shape(name, tuple(arr.shape)):
+                raise RuntimeError(f"TensorRT rejected input shape for '{name}': {tuple(arr.shape)}")
+            t = torch.empty(tuple(arr.shape), dtype=spec["dtype"], device="cuda")
+            t.copy_(torch.from_numpy(arr).to("cuda", non_blocking=True))
+            in_tensors[name] = t
+        out_tensors = {}
+        for name in self.out_names:
+            spec = self.io[name]
+            try:
+                shape = tuple(int(d) for d in ctx.get_tensor_shape(name))
+            except Exception:  # pragma: no cover - legacy context
+                shape = spec["shape"]
+            out_tensors[name] = torch.empty(shape, dtype=spec["dtype"], device="cuda")
+        stream = torch.cuda.current_stream().cuda_stream
+        ok = False
+        if hasattr(ctx, "set_tensor_address"):
+            try:
+                for name, t in in_tensors.items():
+                    ctx.set_tensor_address(name, t.data_ptr())
+                for name, t in out_tensors.items():
+                    ctx.set_tensor_address(name, t.data_ptr())
+                ok = bool(ctx.execute_async_v3(stream_handle=stream))
+            except TypeError:  # pragma: no cover - mixed binding versions
+                ok = False
+        if not ok:
+            ok = bool(
+                ctx.execute_async_v3(
+                    inputs={n: t.data_ptr() for n, t in in_tensors.items()},
+                    outputs={n: t.data_ptr() for n, t in out_tensors.items()},
+                    stream_handle=stream,
+                )
+            )
+        if not ok:
+            raise RuntimeError("TensorRT execute_async_v3 (dynamic) failed")
         torch.cuda.synchronize()
         return {name: t.float().cpu().numpy() for name, t in out_tensors.items()}

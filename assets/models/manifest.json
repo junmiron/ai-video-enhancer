@@ -196,6 +196,68 @@
       "license": "arch BSD-3 (pytorch-CycleGAN-and-pix2pix) + MIT (RaymondLZhou/deepDeband); weights personal use (TAS mirror)",
       "recommended_for": "AI banding repair in the artifact-QA stage",
       "notes": "pix2pix unet_256 generator (8 downsamplings, ngf=64, BatchNorm; 54.4M params). The checkpoint is a plain UnetGenerator256 state dict ('model.*' keys) — the loader remaps it onto the wrapper's .net attribute. Input dims must be multiples of 256 (the wrapper reflect-pads internally); [-1,1] range mapping lives inside the wrapper. Heavier per pixel than SR models at 4K: expect the tiled-inference path to engage when other processes hold VRAM."
+    },
+    {
+      "name": "depth_anything_v2_small",
+      "task": "depth",
+      "version": "vits",
+      "urls": ["https://huggingface.co/depth-anything/Depth-Anything-V2-Small/resolve/main/depth_anything_v2_vits.pth"],
+      "sha256": "715fade13be8f229f8a70cc02066f656f2423a59effd0579197bbf57860e1378",
+      "min_vram_gb": 4,
+      "backends": {"cuda": true, "tensorrt": true},
+      "license": "Apache-2.0 (Depth-Anything-V2)",
+      "recommended_for": "general-purpose depth maps (per-frame; all content types)",
+      "notes": "Official Depth-Anything V2 Small (vits, 239-key strict checkpoint). Per-frame inference: quality high = each axis rounded up to a multiple of 14 (aspect preserved), medium = 700x700, low = 518x518 (TAS calculateAspectRatio parity). Output is per-frame min-max stretched grayscale at source resolution. Fixed-shape fp16 TRT engine per process size; PyTorch-CUDA bf16-autocast fallback."
+    },
+    {
+      "name": "limbo_v1",
+      "task": "depth",
+      "version": "V1",
+      "urls": ["https://github.com/NevermindNilas/TAS-Models-Host/releases/download/main/Limbo.safetensors"],
+      "sha256": "be4a8f22a134c683cef71913fdf981293f2a5e0b6510463c3442da1d1e825b46",
+      "min_vram_gb": 6,
+      "backends": {"cuda": true, "tensorrt": true},
+      "license": "weights CC BY-NC 4.0 + TAS commercial grant (NevermindNilas/Ai-models) - mark NC in UI ⚠️; personal use OK per project decision D3",
+      "recommended_for": "anime depth maps — temporally consistent video streaming",
+      "notes": "Limbo v1: anime finetune of DA3-small (25.9M params, runtime-format checkpoint with cam_enc/cam_dec extras the loader allows). Streaming multi-view inference over sliding windows (4/8/16/32 frames, 50% overlap + median-scale alignment) so depth stays temporally stable; input is fixed at 504x280 (widescreen) or 504x378 (squarer), picked by source aspect ratio. TRT engine uses the TAS-validated streaming export (FP16 with attention MatMuls + Resize/LayerNorm/Softmax/Exp kept FP32; dynamic view axis). Output: 1/depth disparity + per-frame 2/98-percentile stretch at source resolution."
+    },
+    {
+      "name": "limbo_v2",
+      "task": "depth",
+      "version": "V2",
+      "urls": ["https://raw.githubusercontent.com/NevermindNilas/Ai-models/main/Limbo-V2/Limbo.safetensors"],
+      "sha256": "29ba612baade44c064cc3db51925bfef73818693f762d4ea8cc414ab5da3717d",
+      "min_vram_gb": 6,
+      "backends": {"cuda": true, "tensorrt": true},
+      "license": "weights CC BY-NC 4.0 + TAS commercial grant (NevermindNilas/Ai-models) - mark NC in UI ⚠️; personal use OK per project decision D3",
+      "recommended_for": "anime depth maps — default (newer finetune, recommended)",
+      "notes": "Limbo v2: anime finetune of DA3-small, same streaming architecture as limbo_v1 (windowed multi-view + overlap alignment; fixed 504x280 / 504x378 inputs by aspect). Hosted on NevermindNilas/Ai-models (raw.githubusercontent), not TAS-Models-Host — the file is named Limbo.safetensors upstream but lives in its own per-version cache dir, so there is no collision with v1. Default depth model for the Anime preset."
+    },
+    {
+      "name": "depth_anything_3_small",
+      "task": "depth",
+      "version": "vits",
+      "urls": ["https://github.com/NevermindNilas/TAS-Models-Host/releases/download/main/depth_anything_v3_vits.safetensors"],
+      "sha256": "364492e38a3a06d221ac75da7f6621ada3f2361cd24fde11ba79091e9f40efcf",
+      "min_vram_gb": 6,
+      "backends": {"cuda": true, "tensorrt": true},
+      "license": "Apache-2.0 (Depth-Anything-3)",
+      "recommended_for": "experimental: temporally consistent video depth (general content)",
+      "experimental": true,
+      "notes": "Official Depth-Anything-3 small checkpoint, run through the same TAS-validated streaming path as Limbo (windowed multi-view + overlap alignment). Note: input is fixed at 504x280 / 504x378 by aspect ratio — unlike TAS's CUDA-only DA3 mode which negotiates a dynamic process resolution; the TRT export only supports the two validated shapes. Checkpoint carries training-only *_aux heads (allowed missing) and no camera extras."
+    },
+    {
+      "name": "depth_anything_3_base",
+      "task": "depth",
+      "version": "vitb",
+      "urls": ["https://github.com/NevermindNilas/TAS-Models-Host/releases/download/main/depth_anything_v3_vitb.safetensors"],
+      "sha256": "e01067dc1659613083d9145a9a2547ccdbe6ccbbf83c4fe7b3e8a4e2bdae78b5",
+      "min_vram_gb": 8,
+      "backends": {"cuda": true, "tensorrt": true},
+      "license": "Apache-2.0 (Depth-Anything-3)",
+      "recommended_for": "experimental: highest-quality video depth in the lineup (slower than small)",
+      "experimental": true,
+      "notes": "Official Depth-Anything-3 base checkpoint (vitb backbone, ~541 MB) on the same streaming path as limbo/da3-small. Heavier per window: expect longer inference at large windows; VRAM headroom guard skips TRT builds when another process holds most of the GPU and falls back to PyTorch-CUDA bf16 autocast."
     }
   ]
 }

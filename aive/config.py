@@ -55,6 +55,14 @@ class Settings:
     qa_sensitivity: float = 0.5  # global default per-artifact sensitivity in [0,1]
     qa_ai_repairs: bool = True  # AI-model repairs (SCUNet / deepDeband-f); CV fallback when off/unavailable
 
+    # Depth map pass (M5) — independent output generated after enhance completes
+    depth_enabled: bool = False
+    depth_model: str = "limbo_v2"  # registry name (task=depth)
+    depth_output: str = "mp4_10bit"  # mp4_10bit | png16
+    depth_quality: str = "high"  # per-frame models only: high | medium | low
+    depth_window: int = 8  # streaming models: 4 | 8 | 16 | 32 (TAS default is 32)
+    depth_post_upscale: bool = False  # advanced: run frames through the SR runner first
+
     log_level: str = "INFO"
 
 

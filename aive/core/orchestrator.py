@@ -70,6 +70,14 @@ class PipelineConfig:
     qa_sensitivity: float = 0.5
     qa_ai_repairs: bool = True
 
+    # Depth map pass (M5) — independent output, runs after enhance completes
+    depth_enabled: bool = False
+    depth_model: str = "limbo_v2"  # registry name (task=depth)
+    depth_output: str = "mp4_10bit"  # mp4_10bit | png16
+    depth_quality: str = "high"  # per-frame models only: high | medium | low
+    depth_window: int = 8  # streaming models: 4 | 8 | 16 | 32 (TAS default is 32)
+    depth_post_upscale: bool = False  # advanced: run frames through the SR runner first
+
     @classmethod
     def from_settings(cls, s: Settings) -> "PipelineConfig":
         return cls(
@@ -94,6 +102,12 @@ class PipelineConfig:
             qa_min_severity=s.qa_min_severity,
             qa_sensitivity=s.qa_sensitivity,
             qa_ai_repairs=s.qa_ai_repairs,
+            depth_enabled=s.depth_enabled,
+            depth_model=s.depth_model,
+            depth_output=s.depth_output,
+            depth_quality=s.depth_quality,
+            depth_window=s.depth_window,
+            depth_post_upscale=s.depth_post_upscale,
         )
 
     def interpolate_config(self):
@@ -136,8 +150,31 @@ class PipelineConfig:
             sensitivity=sens,
         )
 
+    def depth_config(self):
+        """DepthPassConfig for this pipeline, or None when the depth pass is disabled."""
+        if not self.depth_enabled:
+            return None
+        from ..stages.depth.depth_pass import DepthPassConfig  # lazy: pulls cv2 deps
+
+        sr_model = self.sr_model if self.sr_enabled else None
+        return DepthPassConfig(
+            model=self.depth_model,
+            output=self.depth_output,
+            quality=self.depth_quality,
+            window=self.depth_window,
+            post_upscale=self.depth_post_upscale and self.sr_enabled,
+            sr_model=sr_model,
+            sr_scale=self.sr_scale if self.sr_enabled else None,
+        )
+
     # Fields that do NOT affect lossless segment-chunk content (final-encode / UX only).
-    _NON_CONTENT_FIELDS = frozenset({"output_codec", "crf", "container", "audio_passthrough", "keep_workspace"})
+    # Depth settings are excluded too: the depth pass is an independent output
+    # generated after enhance, so toggling it must not invalidate GPU checkpoints.
+    _NON_CONTENT_FIELDS = frozenset({
+        "output_codec", "crf", "container", "audio_passthrough", "keep_workspace",
+        "depth_enabled", "depth_model", "depth_output", "depth_quality",
+        "depth_window", "depth_post_upscale",
+    })
 
     def content_fingerprint(self) -> str:
         """Stable hash of every setting that affects lossless chunk content.
@@ -384,6 +421,32 @@ def run_pipeline(
         _emit(ErrorEvent(message=str(exc)))
         raise
 
+    # Depth map pass (M5): independent output generated after enhance completes.
+    # A failure here never fails the job — the enhanced file is already written;
+    # record the error in the result and surface it as a stage-scoped event.
+    depth_result = None
+    dcfg = cfg.depth_config()
+    if dcfg is not None:
+        from ..stages.depth.depth_pass import depth_output_path, run_depth_pass  # lazy: pulls cv2 deps
+
+        try:
+            depth_result = run_depth_pass(
+                input_path,
+                depth_output_path(output_path, dcfg.output),
+                dcfg,
+                info,
+                scene_split=cfg.scene_split,
+                emit=_emit,
+                control=control,
+            )
+        except PipelineCancelled:
+            log.warning("Depth pass cancelled by user (enhanced output is complete).")
+            raise
+        except Exception as exc:
+            log.warning("Depth pass failed (enhanced output is unaffected): %s", exc)
+            _emit(ErrorEvent(message=f"Depth map generation failed: {exc}", stage="depth"))
+            depth_result = {"error": str(exc)}
+
     if not cfg.keep_workspace:
         store.clear()
 
@@ -396,6 +459,7 @@ def run_pipeline(
         "output_frames": total_frames,
         "output_width": out_w,
         "output_height": out_h,
+        "depth": depth_result,  # M5: depth pass summary (or {"error": ...})
         "report": None,  # M4 fills in the artifact report
     }
 
