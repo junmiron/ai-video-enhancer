@@ -184,6 +184,10 @@ class InterpolateStage:
 
     # -- stage interface ------------------------------------------------------
 
+    def output_dims(self, ctx) -> tuple[int, int]:
+        """Interpolation changes frame rate, never resolution."""
+        return (ctx.width, ctx.height)
+
     def process(self, frames: Iterator[np.ndarray], ctx) -> Iterator[np.ndarray]:
         import torch  # noqa: F401 - ensure CUDA context is up before first model use
 

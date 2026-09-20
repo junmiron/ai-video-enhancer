@@ -116,6 +116,21 @@ def test_stage_dedup_threshold_zero_disables():
     assert fake.calls == 3  # every interval still costs a model call
 
 
+def test_all_chain_stages_expose_output_dims():
+    """Regression guard for run_pipeline's dimension folding.
+
+    The orchestrator calls ``output_dims`` on every stage in the chain before
+    encoding; any stage missing it crashes the whole job (surfaced by the M5
+    demo re-run: InterpolateStage lacked the method)."""
+    from aive.core.orchestrator import PipelineConfig, build_stage_chain
+
+    cfg = PipelineConfig(fi_enabled=True, sr_enabled=True, qa_enabled=True)
+    dims = (640, 360)
+    for st in build_stage_chain(cfg):
+        dims = st.output_dims(_Ctx(width=dims[0], height=dims[1]))
+    assert dims == (1280, 720)  # SR x2; FI and QA preserve resolution
+
+
 # -- GPU tests (real RIFE 4.25 weights) ----------------------------------------
 
 
