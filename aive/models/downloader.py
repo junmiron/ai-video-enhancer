@@ -14,6 +14,9 @@ import hashlib
 import json
 import logging
 import re
+import socket
+import time
+import urllib.error
 import urllib.request
 from pathlib import Path
 
@@ -39,6 +42,64 @@ def _filename_for(url: str, model_name: str) -> str:
 
 class DownloadError(RuntimeError):
     pass
+
+
+# M7: transient network failures are retried with backoff; every URL in the
+# manifest is a mirror and is tried when an earlier one fails permanently.
+_MAX_ATTEMPTS = 3
+_RETRY_BACKOFF_S = 2.0
+
+
+def _is_transient(exc: Exception) -> bool:
+    """Network-level failures worth retrying; checksum errors are not."""
+    if "SHA-256 mismatch" in str(exc):
+        return False
+    inner = exc.__cause__ or exc
+    if isinstance(inner, (socket.timeout, TimeoutError, ConnectionError)):
+        return True
+    if isinstance(inner, urllib.error.HTTPError):  # subclass of URLError — check first
+        code = getattr(inner, "code", 0) or 0
+        return code in (408, 429) or code >= 500
+    if isinstance(inner, urllib.error.URLError):
+        return True
+    return False
+
+
+def _fetch_one(name: str, direct_url: str, part: Path, progress_cb, expected_sha: str | None) -> str:
+    """Download one URL to `part`; returns the SHA-256 hex digest.
+
+    Raises DownloadError on network failure (partial file removed) or when the
+    digest does not match `expected_sha` (when given).
+    """
+    req = urllib.request.Request(direct_url, headers={"User-Agent": "Mozilla/5.0 (aive model downloader)"})
+    log.info("Downloading %s from %s", name, direct_url)
+    h = hashlib.sha256()
+    total: int | None = None
+    done = 0
+    try:
+        with urllib.request.urlopen(req, timeout=120) as resp, open(part, "wb") as f:
+            total_hdr = resp.headers.get("Content-Length")
+            total = int(total_hdr) if total_hdr else None
+            while True:
+                chunk = resp.read(1 << 20)
+                if not chunk:
+                    break
+                f.write(chunk)
+                h.update(chunk)
+                done += len(chunk)
+                if progress_cb is not None and (total or done > 0):
+                    progress_cb(done, total or -1)
+    except Exception as exc:
+        part.unlink(missing_ok=True)
+        raise DownloadError(f"Download failed for {name}: {exc}") from exc
+
+    digest = h.hexdigest()
+    if expected_sha is not None and digest != expected_sha.lower():
+        part.unlink(missing_ok=True)
+        raise DownloadError(
+            f"SHA-256 mismatch for {name}: got {digest[:16]}…, expected {expected_sha[:16]}…"
+        )
+    return digest
 
 
 def download_model(
@@ -78,34 +139,37 @@ def download_model(
             return _maybe_extract(info, base, target, verified, verified_file)
         raise DownloadError(f"Cache hash mismatch for {target}; delete it and re-download.")
 
-    req = urllib.request.Request(direct, headers={"User-Agent": "Mozilla/5.0 (aive model downloader)"})
-    log.info("Downloading %s from %s", info.name, direct)
     part = target.with_suffix(target.suffix + ".part")
-    h = hashlib.sha256()
-    total: int | None = None
-    done = 0
-    try:
-        with urllib.request.urlopen(req, timeout=60) as resp, open(part, "wb") as f:
-            total_hdr = resp.headers.get("Content-Length")
-            total = int(total_hdr) if total_hdr else None
-            while True:
-                chunk = resp.read(1 << 20)
-                if not chunk:
-                    break
-                f.write(chunk)
-                h.update(chunk)
-                done += len(chunk)
-                if progress_cb is not None and (total or done > 0):
-                    progress_cb(done, total or -1)
-    except Exception as exc:
-        part.unlink(missing_ok=True)
-        raise DownloadError(f"Download failed for {info.name}: {exc}") from exc
-
-    digest = h.hexdigest()
     expected = (info.sha256 or verified.get(fname) or "").lower() or None
-    if expected is not None and digest != expected:
-        part.unlink(missing_ok=True)
-        raise DownloadError(f"SHA-256 mismatch for {info.name}: got {digest[:16]}…, expected {expected[:16]}…")
+
+    # Mirrors: every manifest URL is a fallback source; the primary URL drives
+    # the cache layout so mirror content lands in the same place.
+    candidates: list[str] = []
+    for u in info.urls:
+        d = resolve_gdrive(u) or u
+        if d not in candidates:
+            candidates.append(d)
+
+    digest: str | None = None
+    last_err: Exception | None = None
+    for direct_url in candidates:
+        for attempt in range(1, _MAX_ATTEMPTS + 1):
+            try:
+                digest = _fetch_one(info.name, direct_url, part, progress_cb, expected)
+                break
+            except DownloadError as exc:
+                last_err = exc
+                log.warning(
+                    "Download attempt %d/%d for %s via %s failed: %s",
+                    attempt, _MAX_ATTEMPTS, info.name, direct_url[:120], str(exc)[:300],
+                )
+                if not _is_transient(exc) or attempt == _MAX_ATTEMPTS:
+                    break
+                time.sleep(_RETRY_BACKOFF_S * attempt)
+        if digest is not None:
+            break
+    if digest is None:
+        raise DownloadError(f"Download failed for {info.name} (all mirrors tried): {last_err}")
 
     part.replace(target)
     verified[fname] = digest

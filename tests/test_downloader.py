@@ -52,3 +52,96 @@ def test_hash_mismatch_rejected(tmp_path):
     # No partial file left behind.
     leftovers = [p for p in dest.rglob("*") if p.name.endswith(".part")]
     assert not leftovers
+
+
+# -- M7 retry + mirror behavior (offline; urlopen is monkeypatched) ------------
+
+
+class _FakeResp:
+    def __init__(self, data: bytes):
+        self._data = data
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *a):
+        return False
+
+    @property
+    def headers(self):
+        return {"Content-Length": str(len(self._data))}
+
+    def read(self, n: int) -> bytes:
+        chunk, self._data = self._data[:n], self._data[n:]
+        return chunk
+
+
+def _fail_then_succeed(monkeypatch, failures: list[Exception], data: bytes):
+    """urlopen raises the given exceptions in order, then returns `data`."""
+    calls = {"n": 0}
+
+    def fake_urlopen(req, timeout=None):
+        i = calls["n"]
+        calls["n"] += 1
+        if i < len(failures):
+            raise failures[i]
+        return _FakeResp(data)
+
+    monkeypatch.setattr(urllib.request, "urlopen", fake_urlopen)
+    return calls
+
+
+def test_transient_failures_retried_until_success(tmp_path, monkeypatch):
+    import urllib.error
+
+    data = b"weights-bytes"
+    calls = _fail_then_succeed(
+        monkeypatch,
+        [urllib.error.URLError("connection reset"), TimeoutError("timed out")],
+        data,
+    )
+    path = download_model(_info(), dest_dir=tmp_path / "cache")
+    assert path.read_bytes() == data
+    assert calls["n"] == 3  # two transient failures + one success
+
+
+def test_mirror_fallback_on_permanent_failure(tmp_path, monkeypatch):
+    import urllib.error
+
+    data = b"mirror-bytes"
+    info = ModelInfo(
+        name="mirrored", task="sr", version="1",
+        urls=["https://primary.example/x.bin", "https://mirror.example/x.bin"],
+    )
+    mirror_calls = {"n": 0}
+    sleeps: list[float] = []
+
+    def fake_urlopen(req, timeout=None):
+        url = getattr(req, "full_url", str(req))
+        if "primary" in url:
+            raise urllib.error.HTTPError(url, 404, "not found", {}, None)
+        mirror_calls["n"] += 1
+        return _FakeResp(data)
+
+    monkeypatch.setattr(urllib.request, "urlopen", fake_urlopen)
+    monkeypatch.setattr("aive.models.downloader.time.sleep", lambda s: sleeps.append(s))
+
+    path = download_model(info, dest_dir=tmp_path / "cache")
+    assert path.read_bytes() == data
+    assert mirror_calls["n"] == 1  # the mirror was tried exactly once
+    assert sleeps == []            # non-transient failure -> no backoff sleep
+
+
+def test_all_mirrors_fail_raises(tmp_path, monkeypatch):
+    import urllib.error
+
+    def fake_urlopen(req, timeout=None):
+        raise urllib.error.HTTPError(str(getattr(req, "full_url", req)), 404, "not found", {}, None)
+
+    monkeypatch.setattr(urllib.request, "urlopen", fake_urlopen)
+    info = ModelInfo(
+        name="dead", task="sr", version="1",
+        urls=["https://a.example/x.bin", "https://b.example/x.bin"],
+    )
+    with pytest.raises(DownloadError, match="all mirrors tried"):
+        download_model(info, dest_dir=tmp_path / "cache")

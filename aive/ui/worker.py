@@ -50,6 +50,32 @@ def _emit(evt_q, d: dict) -> None:
         pass
 
 
+def friendly_error(exc: BaseException) -> str:
+    """Wrap low-level failures in actionable messages for the UI (M7).
+
+    The raw message is always kept (truncated) so nothing is hidden; the hint
+    only adds what the user can actually do about it.
+    """
+    msg = str(exc) or exc.__class__.__name__
+    low = msg.lower()
+    if "out of memory" in low or "cublas_status_alloc_failed" in low:
+        return (
+            f"{msg[:400]}\n\nNot enough GPU memory. Close other GPU applications, pick a smaller model/scale, "
+            "or lower the QA proxy height — then retry (finished segments are kept for resume)."
+        )
+    if isinstance(exc, OSError) or "no space left on device" in low:
+        return (
+            f"{msg[:400]}\n\nThe disk appears to be full. Free up space on the drive holding the video and its "
+            "workspace, then retry — finished segments are kept for resume."
+        )
+    if "cuda device not available" in low or "no cuda-capable" in low:
+        return (
+            f"{msg[:400]}\n\nNo usable NVIDIA GPU was found. AI stages require CUDA — check the driver with "
+            "nvidia-smi and restart the app."
+        )
+    return msg
+
+
 # ---------------------------------------------------------------------------
 # System info (banner + meters)
 # ---------------------------------------------------------------------------
@@ -313,7 +339,7 @@ def worker_main(cmd_q, evt_q) -> None:  # noqa: C901 - command dispatch is inher
             _emit(evt_q, {"type": "cancelled", "job_id": str(cmd.get("job_id", ""))})
         except Exception as exc:  # surfaced to the UI as an error event
             log.exception("Pipeline failed for job %s", cmd.get("job_id"))
-            _emit(evt_q, ErrorEvent(message=str(exc), job_id=str(cmd.get("job_id", ""))).to_dict())
+            _emit(evt_q, ErrorEvent(message=friendly_error(exc), job_id=str(cmd.get("job_id", ""))).to_dict())
         finally:
             token_box.pop("token", None)
             pump.join(timeout=2.0)

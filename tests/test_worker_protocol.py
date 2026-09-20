@@ -151,3 +151,25 @@ def test_gpu_info_command(worker):
     gpu = ev["gpu"]
     assert isinstance(gpu.get("cuda_ok"), bool)
     assert isinstance(gpu.get("vram_total_gb"), (int, float))
+
+
+def test_friendly_error_hints():
+    """M7: low-level failures get actionable hints; the raw message is kept."""
+    from aive.ui.worker import friendly_error
+
+    oom = RuntimeError("CUDA out of memory. Tried to allocate 2.00 GiB")
+    msg = friendly_error(oom)
+    assert "out of memory" in msg.lower() and "Not enough GPU memory" in msg
+
+    disk_os = OSError("[Errno 28] No space left on device: 'C:\\ws\\seg.mkv'")
+    assert "disk appears to be full" in friendly_error(disk_os)
+
+    # ffmpeg surfaces the same condition inside a RuntimeError with stderr text.
+    disk_ff = RuntimeError("ffmpeg encode failed (rc=1): convert: No space left on device")
+    assert "disk appears to be full" in friendly_error(disk_ff)
+
+    nogpu = RuntimeError("CUDA device not available")
+    assert "nvidia-smi" in friendly_error(nogpu)
+
+    plain = ValueError("some other failure")
+    assert friendly_error(plain) == "some other failure"

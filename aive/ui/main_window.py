@@ -89,6 +89,7 @@ class MainWindow(QMainWindow):
         self._bridge.event_received.connect(self._on_worker_event)
         self.client = WorkerClient(on_event=self._bridge.event_received.emit)
         self._worker_ready = False
+        self._gpu_ok = False  # set from the worker's ready event (M7 fail-fast)
 
         # -- layout -------------------------------------------------------------
         central = QWidget()
@@ -170,6 +171,15 @@ class MainWindow(QMainWindow):
         self._start_next()
 
     def _start_next(self) -> None:
+        # M7 fail-fast: without CUDA no AI job can run — mark pending items
+        # failed with a clear message instead of letting them die deep in torch.
+        if self._worker_ready and not self._gpu_ok:
+            for q in self.queue:
+                if q["status"] == "pending":
+                    q["status"] = "failed"
+                    q["detail"] = "No NVIDIA GPU detected — AI stages cannot run on this machine."
+            self._refresh_queue_ui()
+            return
         for q in self.queue:
             if q["status"] != "pending":
                 continue
@@ -314,6 +324,7 @@ class MainWindow(QMainWindow):
         if t == "ready":
             g = d.get("gpu") or {}
             self._worker_ready = True
+            self._gpu_ok = bool(g.get("cuda_ok"))
             if g.get("cuda_ok"):
                 trt = f" · TensorRT {g['trt_version']}" if g.get("trt_version") else ""
                 vram = f" · VRAM {g.get('vram_total_gb', 0):g} GiB ({g.get('vram_free_gb', 0):g} free)" if g.get("vram_total_gb") else ""
