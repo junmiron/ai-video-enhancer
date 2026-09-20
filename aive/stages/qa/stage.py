@@ -149,11 +149,28 @@ class QAStage:
 
         # --- source ground-truth provider (proxy res), if available ----------
         n_src = None
-        if getattr(ctx, "input_path", None) and getattr(ctx, "end_frame", 0) > getattr(ctx, "start_frame", 0):
+        if getattr(ctx, "end_frame", 0) > getattr(ctx, "start_frame", 0):
             n_src = ctx.end_frame - ctx.start_frame
         exp_out = getattr(ctx, "expected_out_frames", None)
         # Interpolation is on when the processed stream has more frames than source.
         self._fi_on_flag = bool(exp_out and n_src is not None and int(exp_out) > n_src)
+        # Per-frame interpolation marking (M7 A3): with FI on, only truly synthesized
+        # frames are judged as interpolated. Source frame k lands on output slot
+        # floor(k*num/den) — exact by gap_plan construction and preserved under
+        # de-duplication (which fills slots with copies but never changes counts).
+        # The old blanket flag made ghosting light up on original source frames in
+        # flat parallax scenes, where dual-diff is non-zero everywhere.
+        fi_ratio = getattr(ctx, "fi_ratio", None)
+        if self._fi_on_flag and fi_ratio is not None:
+            num_r, den_r = int(fi_ratio[0]), int(fi_ratio[1])
+            slots: set[int] = set()
+            for k in range(n_src):
+                s = (k * num_r) // den_r
+                if 0 <= s < int(exp_out):
+                    slots.add(s)
+            self._orig_slots = slots or None
+        else:
+            self._orig_slots = None
         src_provider = None
         # Proxy dims are derived from the first real frame (ctx carries source dims).
         pw = ph = None
@@ -212,7 +229,7 @@ class QAStage:
                 src_center=src_center,
                 scene_ref=scene_ref,
                 mags=_mags(wp, buf_gidx),
-                is_interpolated=self._fi_on,
+                is_interpolated=self._is_interp(gidx),
                 recent_iqa=list(iqa_hist),
             )
 
@@ -261,7 +278,7 @@ class QAStage:
                             src_center=src_center,
                             scene_ref=scene_ref,
                             mags=win.mags,
-                            is_interpolated=self._fi_on,
+                            is_interpolated=self._is_interp(gidx),
                             recent_iqa=list(iqa_hist),
                         )
                         _, after_metric = run_detector(art, win2, sens)
@@ -308,7 +325,12 @@ class QAStage:
             if pw is None:
                 h0, w0 = int(frame.shape[0]), int(frame.shape[1])
                 pw, ph = proxy_dims(w0, h0, target_h=cfg.proxy_height)
-                if src_provider is None and n_src is not None and getattr(ctx, "expected_out_frames", None):
+                if (
+                    src_provider is None
+                    and n_src is not None
+                    and getattr(ctx, "input_path", None)
+                    and getattr(ctx, "expected_out_frames", None)
+                ):
                     src_provider = _SourceProvider(
                         ctx.input_path, ctx.start_frame, n_src, int(ctx.expected_out_frames), pw, ph
                     )
@@ -343,9 +365,18 @@ class QAStage:
 
     # -- helpers --------------------------------------------------------------
 
-    @property
-    def _fi_on(self) -> bool:
-        return getattr(self, "_fi_on_flag", False)
+    def _is_interp(self, gidx: int) -> bool:
+        """True if output frame ``gidx`` was synthesized by FI (not a source copy).
+
+        Falls back to the legacy blanket flag when no slot ratio is available on
+        the context (e.g. older callers / unit-test fakes without fi_ratio).
+        """
+        if not getattr(self, "_fi_on_flag", False):
+            return False
+        slots = getattr(self, "_orig_slots", None)
+        if slots is None:
+            return True
+        return gidx not in slots
 
 
 def _fps_float(fps: str | float) -> float:

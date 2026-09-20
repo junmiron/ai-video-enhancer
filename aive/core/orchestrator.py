@@ -233,6 +233,10 @@ class StageContext:
     # M4 QA ground-truth access (optional; default None keeps earlier stages unchanged).
     input_path: str | None = None  # source path so QA can decode proxy refs for detection
     expected_out_frames: int | None = None  # processed-frame count for this segment
+    # M7 A3: FI slot ratio (num, den) when interpolation is enabled. QA uses it to mark
+    # only truly synthesized frames as interpolated (source frame k lands on output slot
+    # floor(k*num/den)); None -> legacy blanket flagging.
+    fi_ratio: tuple[int, int] | None = None
     # M6 UI: ControlToken so stages poll pause/cancel per frame (mid-segment cancel).
     control: object | None = None
 
@@ -471,6 +475,7 @@ def run_pipeline(
                 info.width, info.height, info.fps, seg.index, seg.start_frame, seg.end_frame,
                 input_path=input_path,
                 expected_out_frames=seg_out_counts[seg.index],
+                fi_ratio=(num, den) if fi_cfg is not None else None,
                 control=control,
             )
             stream: Iterator[np.ndarray] = raw
