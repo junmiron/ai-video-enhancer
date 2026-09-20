@@ -19,6 +19,8 @@ PRESETS: dict[str, dict] = {
             "The default choice for anime content."
         ),
         "fields": {
+            # TAS-proven stage order: interpolate at source res (fast), then upscale.
+            "stage_order": "fi_first",
             # Frame interpolation: 60 fps target, light de-duplication of held frames.
             "fi_enabled": True,
             "fi_model": "rife_425",
@@ -47,9 +49,12 @@ PRESETS: dict[str, dict] = {
         "label": "Live Action",
         "description": (
             "Real-ESRGAN upscale + RIFE interpolation for photographic content. "
-            "No anime de-duplication."
+            "Upscale runs before interpolation (design §3.1) for maximum motion "
+            "detail; no anime de-duplication."
         ),
         "fields": {
+            # Upscale first: RIFE at target resolution — slower, best motion fidelity.
+            "stage_order": "sr_first",
             "fi_enabled": True,
             "fi_model": "rife_425",
             "fi_target_fps": 60.0,
@@ -76,6 +81,7 @@ PRESETS: dict[str, dict] = {
             "Safe defaults when the content type is unclear."
         ),
         "fields": {
+            "stage_order": "fi_first",
             "fi_enabled": True,
             "fi_model": "rife_425",
             "fi_target_fps": None,
@@ -103,6 +109,8 @@ PRESETS: dict[str, dict] = {
             "pipeline on a clip before committing to a long job."
         ),
         "fields": {
+            # FI is off here, so stage order has no effect; keep the fast default.
+            "stage_order": "fi_first",
             "fi_enabled": False,
             "fi_model": "rife_425",
             "fi_target_fps": None,

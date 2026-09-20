@@ -260,8 +260,18 @@ class SettingsPage(QWidget):
         g, gl = _group("Advanced")
         self.scene_cb = QCheckBox("Scene-cut detection (never interpolate across cuts)")
         self.keep_cb = QCheckBox("Keep lossless workspace chunks after success")
+        self.order_combo = QComboBox()
+        self.order_combo.addItem("Interpolate → Upscale (fast — TAS order)", "fi_first")
+        self.order_combo.addItem("Upscale → Interpolate (max motion detail; slower)", "sr_first")
+        self.order_combo.setToolTip(
+            "Stage order (design §3.1). 'Interpolate first' runs RIFE at source resolution — much faster, "
+            "the TAS-proven default for anime. 'Upscale first' runs RIFE at the upscaled target resolution: "
+            "slower and more VRAM-hungry, but best motion fidelity on live-action content. "
+            "Artifact QA always runs last either way."
+        )
         gl.addWidget(self.scene_cb)
         gl.addWidget(self.keep_cb)
+        gl.addWidget(self.order_combo)
         lay.addWidget(g)
 
         lay.addStretch(1)
@@ -280,7 +290,7 @@ class SettingsPage(QWidget):
         for w in (
             self.sr_combo, self.scale_combo, self.fps_combo, self.mult_combo,
             self.quality_combo, self.depth_combo, self.depth_out_combo,
-            self.container_combo, self.codec_combo,
+            self.container_combo, self.codec_combo, self.order_combo,
         ):
             w.currentIndexChanged.connect(lambda _i: self._on_change())
         for w in (self.dedup_spin, self.crf_spin):
@@ -413,6 +423,7 @@ class SettingsPage(QWidget):
             self.audio_cb.setChecked(bool(s.audio_passthrough))
             self.scene_cb.setChecked(bool(s.scene_split))
             self.keep_cb.setChecked(bool(s.keep_workspace))
+            self._set_combo_by_data(self.order_combo, getattr(s, "stage_order", "fi_first"))
 
             self._sync_fi()
             self._sync_quality()
@@ -435,6 +446,7 @@ class SettingsPage(QWidget):
             "audio_passthrough": bool(self.audio_cb.isChecked()),
             "scene_split": bool(self.scene_cb.isChecked()),
             "keep_workspace": bool(self.keep_cb.isChecked()),
+            "stage_order": self.order_combo.currentData(),
             "fi_enabled": bool(self.fi_cb.isChecked()),
             "fi_model": fi_model,
             "fi_target_fps": float(self.fps_combo.currentData()) if is_fps else None,

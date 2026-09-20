@@ -33,6 +33,9 @@ class Settings:
     # Pipeline behavior
     scene_split: bool = True
     keep_workspace: bool = False  # keep FFV1 segment chunks after success
+    # Stage order (design.md §3.1): fi_first = TAS-proven interpolate->upscale (fast);
+    # sr_first = upscale->interpolate for max motion detail (RIFE at target res; slower).
+    stage_order: str = "fi_first"  # fi_first | sr_first
 
     # Frame interpolation (M2)
     fi_enabled: bool = False

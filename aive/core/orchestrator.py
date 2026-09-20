@@ -44,6 +44,8 @@ class PipelineConfig:
     container: str = "mp4"
     audio_passthrough: bool = True
     keep_workspace: bool = False
+    # Stage order (design.md §3.1): fi_first (TAS-proven, fast) | sr_first (max motion detail).
+    stage_order: str = "fi_first"
 
     # Frame interpolation (M2)
     fi_enabled: bool = False
@@ -96,6 +98,7 @@ class PipelineConfig:
             container=s.container,
             audio_passthrough=s.audio_passthrough,
             keep_workspace=s.keep_workspace,
+            stage_order=s.stage_order,
             fi_enabled=s.fi_enabled,
             fi_model=s.fi_model,
             fi_target_fps=s.fi_target_fps,
@@ -280,24 +283,60 @@ def _fps_to_str(fps: float) -> str:
 
 
 def build_stage_chain(cfg: PipelineConfig) -> list[Stage]:
-    """Assemble the stage chain (design.md order: interpolate -> upscale -> QA)."""
-    stages: list[Stage] = []
+    """Assemble the stage chain (design.md §3.1).
+
+    Default order is TAS-proven and speed-first: interpolate -> upscale -> QA —
+    RIFE runs at source resolution, which is dramatically cheaper than at the
+    upscaled target. ``sr_first`` swaps the first two stages (upscale ->
+    interpolate) for maximum motion detail on live-action content; QA always
+    stays last so it sees the final frames and can compare against the original.
+    """
+    if cfg.stage_order not in ("fi_first", "sr_first"):
+        raise ValueError(f"Unknown stage order: {cfg.stage_order!r} (expected 'fi_first' or 'sr_first')")
+
     fi_cfg = cfg.interpolate_config()
-    if fi_cfg is not None:
+    sr_cfg = cfg.upscale_config()
+    qa_cfg = cfg.qa_config()
+
+    def _fi():
+        if fi_cfg is None:
+            return None
         from ..stages.interpolate.stage import InterpolateStage  # lazy: pulls torch deps
 
-        stages.append(InterpolateStage(fi_cfg))
-    sr_cfg = cfg.upscale_config()
-    if sr_cfg is not None:
+        return InterpolateStage(fi_cfg)
+
+    def _sr():
+        if sr_cfg is None:
+            return None
         from ..stages.upscale.stage import UpscaleStage  # lazy: pulls torch deps
 
-        stages.append(UpscaleStage(sr_cfg))
-    qa_cfg = cfg.qa_config()
+        return UpscaleStage(sr_cfg)
+
+    first, second = (_fi(), _sr()) if cfg.stage_order == "fi_first" else (_sr(), _fi())
+    stages: list[Stage] = [st for st in (first, second) if st is not None]
     if qa_cfg is not None:
         from ..stages.qa.stage import QAStage  # lazy: pulls cv2 deps
 
         stages.append(QAStage(qa_cfg))
     return stages or [IdentityStage()]
+
+
+def stage_frame_counts(stages: list[Stage], n_src: int, fi_ratio: tuple[int, int] | None) -> list[int]:
+    """Expected output frame count per stage for one segment (design.md §3.1).
+
+    Only interpolation changes the frame count — de-duplication fills removed
+    slots with copies so its net effect is zero; upscale and QA pass frames
+    through unchanged. ``fi_ratio`` is ``(num, den)`` from InterpolateConfig.ratio()
+    or None when FI is disabled (then every stage sees n_src).
+    """
+    counts: list[int] = []
+    n = n_src
+    for st in stages:
+        if getattr(st, "name", "") == "interpolate" and fi_ratio is not None:
+            num, den = fi_ratio
+            n = estimate_output_frames(n, num, den)
+        counts.append(n)
+    return counts
 
 
 def _throttled_frames(frames: Iterator[np.ndarray], every: int, on_frame: Callable[[int], None]) -> Iterator[np.ndarray]:
@@ -435,8 +474,13 @@ def run_pipeline(
                 control=control,
             )
             stream: Iterator[np.ndarray] = raw
-            for st in stages:
-                stream = _counting_frames(st.process(stream, ctx), st.name, seg_out_counts[seg.index], emit=_emit)
+            # Per-stage expected counts (design.md §3.1): with sr_first the upscale
+            # stage sees source-res frame counts while interpolate/QA see the final count.
+            per_stage_counts = stage_frame_counts(
+                stages, seg.frame_count, (num, den) if fi_cfg is not None else None
+            )
+            for st_idx, st in enumerate(stages):
+                stream = _counting_frames(st.process(stream, ctx), st.name, per_stage_counts[st_idx], emit=_emit)
 
             def _on_frame(i: int):
                 nonlocal frames_done_global
