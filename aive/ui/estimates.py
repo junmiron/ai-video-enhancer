@@ -7,8 +7,9 @@ from __future__ import annotations
 
 # Approximate bits-per-pixel at CRF ~19 for our encode presets (anime content is
 # very compressible; these are mid-range values from typical x265/NVENC runs).
+# M7 A4: the x265 anime preset gained aq-mode=3 (+~11% size, +1.3 dB SSIM) -> 0.10 -> 0.11.
 _BPP_BASE = {
-    "x265-10bit-anime": 0.10,
+    "x265-10bit-anime": 0.11,
     "nvenc-hevc-10bit": 0.13,
     "h264": 0.16,
 }

@@ -73,3 +73,40 @@ PyTorch 28.5 / 57.6 / 27.0 / 58.7 / 29.1 / 57.5 (same row order).
   concurrent test process and has been superseded.
 - p95 at 1080p shows occasional ~30 ms spikes (page faults / allocator); medians
   are the stable comparison metric.
+
+## x265 10-bit anime preset — encode defaults review (M7 A4)
+
+Reviewed the `x265-10bit-anime` final-encode preset on flat-color anime content:
+`samples/m5-demo/anime_enhanced.mp4` (1280×720@60, 179 frames — the M5.x FI+SR
+demo output), CRF 19 throughout. ffmpeg 9.0.1 full build (libx265 v4), quality
+measured against the encode input with VMAF (default model), SSIM and PSNR.
+
+| Config | x265-params (beyond `preset slow`) | Size KB | Encode s | VMAF | SSIM All | PSNR avg |
+|---|---|---:|---:|---:|---:|---:|
+| A current | `bframes=8:rc-lookahead=60` | 529.0 | 1.9 | 96.597 | 0.998094 (27.20 dB) | 53.19 dB |
+| B deep decision | A + `rd=6:rdoq-level=2:ref=4:limit-modes=0` | 533.9 (+0.9%) | **4.2 (+121%)** | 96.513 (−0.08) | 0.997936 (−0.35 dB) | 52.85 dB (−0.33) |
+| C anime AQ | A + `aq-mode=3:aq-strength=1.0:rdoq-level=2` | 589.9 (+11.5%) | 1.9 | **96.779** | **0.998597 (+1.33 dB)** | **54.42 dB (+1.24)** |
+| D isolation: rdoq only | A + `rdoq-level=2` | 529.0 (=A) | 1.9 | =A (bit-identical metrics) | =A | =A |
+| E isolation: AQ only | A + `aq-mode=3:aq-strength=1.0` | 589.9 (=C) | 1.9 | =C (bit-identical metrics) | =C | =C |
+
+### Findings
+
+1. **Adopted: `bframes=8:rc-lookahead=60:aq-mode=3`** (now the preset default in
+   [`aive/stages/encode.py`](../aive/stages/encode.py)). aq-mode is x265's adaptive
+   quantization selector (x265 manual: 0=off, 1=uniform cost, 2=variance [default],
+   3=bias variance); mode 3 redistributes bits toward flat regions and line art —
+   exactly the anime content profile. Measured +1.3 dB SSIM / +1.24 dB PSNR /
+   VMAF 96.78 vs 96.60 at identical encode speed, for ~+11% file size (still tiny:
+   this clip is 590 KB). The UI size estimate was bumped to match
+   (`_BPP_BASE` 0.10 → 0.11 in `aive/ui/estimates.py`).
+2. **Deeper mode decision (rd=6, limit-modes=0, ref=4) is a loss on this content**:
+   2.2× the encode time for slightly *worse* metrics — at CRF 19 preset `slow`
+   already spends enough decision effort; the extra search just re-allocates bits
+   differently without perceptual gain. Rejected.
+3. **rdoq-level=2 is a no-op here** (D bit-matches A): at CRF 19 quantization is
+   gentle enough that RDOQ's coefficient decisions don't change. Dropped from the
+   preset to keep it minimal; revisit if the default CRF ever moves up.
+4. Caveats: single short synthetic clip near the quality ceiling (VMAF ~96+), and
+   VMAF's default model is live-action-trained — but all three metrics agree on the
+   ordering C > A > B, so the conclusion is robust. Re-benchmark on real episodes
+   if encode-time or size regressions are ever reported.

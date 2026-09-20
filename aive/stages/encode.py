@@ -28,7 +28,10 @@ def video_args(preset: str, crf: int) -> list[str]:
             "-preset", "slow",
             # x265 v4 removed the `anime`/`stillimage` tunes; emulate their intent
             # (flat colors, sharp line art, static scenes) with explicit params.
-            "-x265-params", "bframes=8:rc-lookahead=60",
+            # aq-mode=3 (variance-bias AQ per the x265 manual): measured +1.3 dB SSIM /
+            # +1.24 dB PSNR at CRF 19 on flat-color anime content at identical encode
+            # speed (+~11% size) — see docs/benchmarks.md, M7 A4.
+            "-x265-params", "bframes=8:rc-lookahead=60:aq-mode=3",
         ]
     if preset == CodecPreset.NVENC_HEVC_10BIT:
         return [
