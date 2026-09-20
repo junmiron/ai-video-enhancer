@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import json
 import os
-from dataclasses import asdict, dataclass, fields
+from dataclasses import asdict, dataclass, field, fields
 from pathlib import Path
 
 APP_NAME = "ai-video-enhancer"
@@ -52,8 +52,22 @@ class Settings:
     qa_proxy_height: int = 720  # detector resolution target (§4.5 proxy-first)
     qa_window_size: int = 7  # temporal window for detectors/repairs (kept odd)
     qa_min_severity: float = 0.15  # record a finding only at/above this severity
-    qa_sensitivity: float = 0.5  # global default per-artifact sensitivity in [0,1]
+    # Per-artifact sensitivity in [0,1] — the design.md §4.4 sliders (M6 UI).
+    qa_sens_flicker: float = 0.5
+    qa_sens_ghosting: float = 0.5
+    qa_sens_banding: float = 0.5
+    qa_sens_halo: float = 0.5
+    qa_sens_lineart: float = 0.5
+    qa_sens_color_drift: float = 0.5
+    qa_sens_regression: float = 0.5
+    # Manual mode (design.md §4.4): which artifact types are active.
+    qa_manual_artifacts: list = field(
+        default_factory=lambda: [
+            "flicker", "ghosting", "banding", "halo", "lineart", "color_drift", "regression",
+        ]
+    )
     qa_ai_repairs: bool = True  # AI-model repairs (SCUNet / deepDeband-f); CV fallback when off/unavailable
+    qa_show_report: bool = True  # UI flag (M6): jump to the report view when a job finishes
 
     # Depth map pass (M5) — independent output generated after enhance completes
     depth_enabled: bool = False

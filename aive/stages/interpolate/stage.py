@@ -19,6 +19,7 @@ from typing import Iterator
 
 import numpy as np
 
+from ...core.jobqueue import check_control  # M6: per-frame pause/cancel polling
 from .gapplan import fps_ratio, gap_plan, interpolate_timestep
 from .rife_model import (
     RIFE_VARIANTS,
@@ -211,7 +212,9 @@ class InterpolateStage:
         num, den = self.cfg.ratio(_fps_from_str(ctx.fps))
         prev: np.ndarray | None = None
         prev_pos = 0
+        ctl = getattr(ctx, "control", None)
         for cur_pos, frame in enumerate(frames):
+            check_control(ctl)  # M6: pause/cancel takes effect within one source frame
             if prev is None:
                 yield frame
                 prev = frame

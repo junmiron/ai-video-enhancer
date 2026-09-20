@@ -23,6 +23,7 @@ from typing import Iterator
 
 import numpy as np
 
+from ...core.jobqueue import check_control  # M6: per-frame pause/cancel polling
 from .sr_model import SPECS, SRExportWrapper, build_sr, load_sr, spec_for
 from .tiling import (
     OVERLAP,
@@ -294,7 +295,9 @@ class UpscaleStage:
         target_scale = self.cfg.scale or native_scale
         out_w, out_h = ctx.width * target_scale, ctx.height * target_scale
 
+        ctl = getattr(ctx, "control", None)
         for frame in frames:
+            check_control(ctl)  # M6: pause/cancel takes effect within one frame
             up = runner(frame)  # HWC uint8 at native scale
             if target_scale != native_scale:
                 import cv2

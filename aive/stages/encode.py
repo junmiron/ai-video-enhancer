@@ -37,6 +37,9 @@ def video_args(preset: str, crf: int) -> list[str]:
             "-rc", "vbr",
             "-cq", str(crf),
             "-b:v", "0",
+            # Without this, hevc_nvenc defaults to 8-bit when fed an 8-bit
+            # source (e.g. rgb24 pipe input) and the output is yuv420p.
+            "-pix_fmt", "yuv420p10le",
         ]
     if preset == CodecPreset.H264:
         return ["-c:v", "libx264", "-pix_fmt", "yuv420p", "-crf", str(crf), "-preset", "slow"]

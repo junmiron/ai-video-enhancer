@@ -3,8 +3,11 @@ from __future__ import annotations
 
 import json
 import logging
+import queue
+import re
 import shutil
 import subprocess
+import threading
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -144,3 +147,79 @@ def decode_frames(
         rc = proc.wait()
         if rc != 0 and err.strip():
             log.error("ffmpeg decode failed (rc=%s): %s", rc, err[:2000])
+
+
+def grab_frame(path: str | Path, index: int):
+    """Fast single-frame grab for the M6 preview compare view (design.md §7.3).
+
+    Input-seeks ~2 s before the target frame and decodes forward until the
+    requested absolute frame number is reached — matched via ``showinfo``
+    ``pts_time`` values, which stay accurate after an input seek. Only a couple
+    of seconds of video are decoded instead of everything up to `index`, so
+    this stays interactive even on long 1080p/4K files.
+
+    Returns the frame as HxWx3 uint8 RGB, or ``None`` when out of range / on error.
+    """
+    import time as _time
+
+    path = str(path)
+    info = probe(path)
+    if index < 0 or (info.num_frames and index >= info.num_frames):
+        return None
+    fps = info.fps_float or 30.0
+    t_target = index / fps
+    seek = max(0.0, t_target - 2.0)
+    limit = int((t_target - seek) * fps) + 8  # decode margin past the target
+
+    cmd = [
+        find_ffmpeg(), "-v", "info",
+        "-ss", f"{seek:.6f}",
+        "-i", path,
+        # Keep ORIGINAL (absolute) timestamps after the input seek — without it
+        # showinfo's pts_time is relative to the seek point and late frames in a
+        # file never match their absolute index.
+        "-copyts",
+        "-vf", "showinfo", "-an", "-sn",
+        "-frames:v", str(limit),
+        "-f", "rawvideo", "-pix_fmt", "rgb24", "-",
+    ]
+    proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    frame_size = info.width * info.height * 3
+    frames_q: queue.Queue[bytes | None] = queue.Queue(maxsize=16)
+
+    def _reader():
+        try:
+            while True:
+                buf = _read_exact(proc.stdout, frame_size)
+                if buf is None:
+                    break
+                frames_q.put(buf)
+        except Exception:  # pragma: no cover - pipe closed early
+            pass
+        finally:
+            frames_q.put(None)
+
+    reader = threading.Thread(target=_reader, daemon=True)
+    reader.start()
+    deadline = _time.time() + 60.0
+    try:
+        for line in proc.stderr:
+            if _time.time() > deadline:
+                return None
+            m = re.search(r"pts_time:\s*([0-9]+(?:\.[0-9]+)?)", line.decode("utf-8", "replace"))
+            if not m or "Parsed_showinfo" not in line.decode("utf-8", "replace"):
+                continue
+            idx = int(round(float(m.group(1)) * fps))
+            buf = frames_q.get(timeout=30.0)
+            if buf is None:  # stream ended before the target frame
+                return None
+            if idx >= index:
+                return np.frombuffer(buf, dtype=np.uint8).reshape(info.height, info.width, 3).copy()
+    except (queue.Empty, OSError):
+        return None
+    finally:
+        try:
+            proc.kill()
+        except OSError:  # pragma: no cover
+            pass
+        proc.wait()

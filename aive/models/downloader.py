@@ -156,6 +156,26 @@ def _maybe_extract(
     return out_path
 
 
+def cached_weights_path(info: ModelInfo, dest_dir: str | Path | None = None) -> Path | None:
+    """Local path of already-downloaded weights for `info`, or ``None`` if not cached.
+
+    Pure filesystem check (no network) — the M6 UI uses it to mark models as
+    ready in model lists and to decide what the first-run download offers.
+    """
+    from ..config import model_cache_dir
+
+    if not info.urls:
+        return None  # experimental model without a configured URL
+    base = Path(dest_dir) if dest_dir else model_cache_dir() / info.name / info.version
+    url = info.urls[0]
+    direct = resolve_gdrive(url) or url
+    target = base / _filename_for(direct, info.name)
+    if info.extract_member:
+        out_path = base / Path(info.extract_member).name
+        return out_path if out_path.exists() else None
+    return target if target.exists() else None
+
+
 def _sha256_file(path: Path) -> str:
     h = hashlib.sha256()
     with open(path, "rb") as f:

@@ -28,6 +28,8 @@ from typing import Iterator
 
 import numpy as np
 
+from ...core.jobqueue import check_control  # M6: per-frame pause/cancel polling
+
 log = logging.getLogger(__name__)
 
 
@@ -300,7 +302,9 @@ class QAStage:
             return out_frame
 
         # --- main streaming loop ---------------------------------------------
+        ctl = getattr(ctx, "control", None)
         for i, frame in enumerate(frames):
+            check_control(ctl)  # M6: pause/cancel takes effect within one frame
             if pw is None:
                 h0, w0 = int(frame.shape[0]), int(frame.shape[1])
                 pw, ph = proxy_dims(w0, h0, target_h=cfg.proxy_height)

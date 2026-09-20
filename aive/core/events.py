@@ -75,6 +75,9 @@ class JobFinished(Event):
     output_path: str = ""
     elapsed_s: float = 0.0
     report: dict | None = None
+    # M6 UI: paths of the exported artifact-report files ("json", "png") when a QA
+    # stage ran, so the report view can offer Export without re-deriving paths.
+    report_files: dict | None = None
     type: str = field(default="job_finished", init=False)
 
 

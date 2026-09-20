@@ -3,12 +3,22 @@
 M1: in-process queue + threading events (worker runs in a separate process
 from M6 onward; the same Job/ControlToken types cross the boundary).
 """
+
+
 from __future__ import annotations
 
 import time
 import uuid
 from dataclasses import dataclass, field
 from enum import Enum
+
+
+class PipelineCancelled(Exception):
+    """Raised by stages/orchestrator when the user cancels a running job.
+
+    Lives here (not in orchestrator) so pipeline stages can import it without
+    an import cycle — the orchestrator re-exports it for backward compatibility.
+    """
 
 
 class JobStatus(str, Enum):
@@ -61,6 +71,19 @@ class ControlToken:
 
         while self._pause and not self._cancel:
             _t.sleep(poll_s)
+
+
+def check_control(control: ControlToken | None) -> None:
+    """Poll a :class:`ControlToken` (no-op when ``None``).
+
+    Stages call this once per frame so pause takes effect within one frame and
+    cancel aborts mid-segment instead of waiting for the next segment boundary.
+    Raises :class:`PipelineCancelled` when a cancel was requested.
+    """
+    if control is not None:
+        control.wait_if_paused()
+        if control.cancelled:
+            raise PipelineCancelled()
 
 
 class JobQueue:

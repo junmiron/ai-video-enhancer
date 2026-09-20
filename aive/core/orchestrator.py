@@ -31,13 +31,9 @@ from .events import (
     StageProgress,
     StageStarted,
 )
-from .jobqueue import ControlToken
+from .jobqueue import ControlToken, PipelineCancelled  # noqa: F401 - re-export (stages import from jobqueue)
 
 log = logging.getLogger(__name__)
-
-
-class PipelineCancelled(Exception):
-    pass
 
 
 @dataclass
@@ -67,7 +63,20 @@ class PipelineConfig:
     qa_proxy_height: int = 720
     qa_window_size: int = 7
     qa_min_severity: float = 0.15
-    qa_sensitivity: float = 0.5
+    # Per-artifact sensitivity in [0,1] (design.md §4.4; M6 UI sliders).
+    qa_sens_flicker: float = 0.5
+    qa_sens_ghosting: float = 0.5
+    qa_sens_banding: float = 0.5
+    qa_sens_halo: float = 0.5
+    qa_sens_lineart: float = 0.5
+    qa_sens_color_drift: float = 0.5
+    qa_sens_regression: float = 0.5
+    # Manual mode: which artifact types are active (design.md §4.4).
+    qa_manual_artifacts: list = field(
+        default_factory=lambda: [
+            "flicker", "ghosting", "banding", "halo", "lineart", "color_drift", "regression",
+        ]
+    )
     qa_ai_repairs: bool = True
 
     # Depth map pass (M5) — independent output, runs after enhance completes
@@ -100,7 +109,14 @@ class PipelineConfig:
             qa_proxy_height=s.qa_proxy_height,
             qa_window_size=s.qa_window_size,
             qa_min_severity=s.qa_min_severity,
-            qa_sensitivity=s.qa_sensitivity,
+            qa_sens_flicker=s.qa_sens_flicker,
+            qa_sens_ghosting=s.qa_sens_ghosting,
+            qa_sens_banding=s.qa_sens_banding,
+            qa_sens_halo=s.qa_sens_halo,
+            qa_sens_lineart=s.qa_sens_lineart,
+            qa_sens_color_drift=s.qa_sens_color_drift,
+            qa_sens_regression=s.qa_sens_regression,
+            qa_manual_artifacts=list(s.qa_manual_artifacts),
             qa_ai_repairs=s.qa_ai_repairs,
             depth_enabled=s.depth_enabled,
             depth_model=s.depth_model,
@@ -139,7 +155,16 @@ class PipelineConfig:
         from ..stages.qa.findings import ArtifactType  # cheap (no cv2/torch)
         from ..stages.qa.stage import QAConfig  # lazy: pulls cv2 deps
 
-        sens = {a.value: float(self.qa_sensitivity) for a in ArtifactType.all()}
+        sens = {
+            "flicker": float(self.qa_sens_flicker),
+            "ghosting": float(self.qa_sens_ghosting),
+            "banding": float(self.qa_sens_banding),
+            "halo": float(self.qa_sens_halo),
+            "lineart": float(self.qa_sens_lineart),
+            "color_drift": float(self.qa_sens_color_drift),
+            "regression": float(self.qa_sens_regression),
+        }
+        enabled = {a.value: a.value in self.qa_manual_artifacts for a in ArtifactType.all()}
         return QAConfig(
             enabled=True,
             ai_repairs=self.qa_ai_repairs,
@@ -148,6 +173,7 @@ class PipelineConfig:
             window_size=self.qa_window_size,
             min_severity=self.qa_min_severity,
             sensitivity=sens,
+            enabled_artifacts=enabled,
         )
 
     def depth_config(self):
@@ -204,6 +230,8 @@ class StageContext:
     # M4 QA ground-truth access (optional; default None keeps earlier stages unchanged).
     input_path: str | None = None  # source path so QA can decode proxy refs for detection
     expected_out_frames: int | None = None  # processed-frame count for this segment
+    # M6 UI: ControlToken so stages poll pause/cancel per frame (mid-segment cancel).
+    control: object | None = None
 
 
 class Stage:
@@ -279,6 +307,36 @@ def _throttled_frames(frames: Iterator[np.ndarray], every: int, on_frame: Callab
             on_frame(i)
         yield f
         i += 1
+
+
+def _counting_frames(
+    frames: Iterator[np.ndarray], stage_name: str, expected_total: int, emit: Callable[[object], None]
+) -> Iterator[np.ndarray]:
+    """Count frames emitted by one stage and report throttled per-stage progress.
+
+    M6 UI: the processing view shows a bar per pipeline stage (design.md §7.4).
+    Every stage in the chain emits exactly `expected_total` frames for a segment
+    (interpolation produces them, later stages pass them through), so each stage's
+    counter is directly comparable.
+    """
+    i = 0
+    total = max(1, expected_total)
+    t0 = time.time()
+    for f in frames:
+        yield f
+        i += 1
+        if i % 30 == 0 or i >= total:
+            elapsed = max(1e-9, time.time() - t0)
+            rate = i / elapsed
+            emit(
+                StageProgress(
+                    stage=stage_name,
+                    frames_done=i,
+                    frames_total=total,
+                    fps=rate,
+                    eta_s=max(0.0, (total - i) / rate) if rate > 0 else 0.0,
+                )
+            )
 
 
 def run_pipeline(
@@ -374,10 +432,11 @@ def run_pipeline(
                 info.width, info.height, info.fps, seg.index, seg.start_frame, seg.end_frame,
                 input_path=input_path,
                 expected_out_frames=seg_out_counts[seg.index],
+                control=control,
             )
             stream: Iterator[np.ndarray] = raw
             for st in stages:
-                stream = st.process(stream, ctx)
+                stream = _counting_frames(st.process(stream, ctx), st.name, seg_out_counts[seg.index], emit=_emit)
 
             def _on_frame(i: int):
                 nonlocal frames_done_global
@@ -461,6 +520,7 @@ def run_pipeline(
         "output_height": out_h,
         "depth": depth_result,  # M5: depth pass summary (or {"error": ...})
         "report": None,  # M4 fills in the artifact report
+        "report_files": None,  # M6 UI: exported report paths ({"json", "png"}) when QA ran
     }
 
     # Collect the artifact-QA report (M4) if a QA stage ran.
@@ -472,9 +532,18 @@ def run_pipeline(
             from ..stages.qa.report import save_report
 
             saved = save_report(qa_stage.report, workspaces_dir() / job_id, base_name="artifact-report")
+            result["report_files"] = saved
             log.info("Artifact report written: %s", saved)
         except Exception as exc:  # never fail the job over a report export
             log.warning("Failed to write artifact report files: %s", exc)
     result["report"] = report_dict
-    _emit(JobFinished(ok=True, output_path=output_path, elapsed_s=result["elapsed_s"], report=report_dict))
+    _emit(
+        JobFinished(
+            ok=True,
+            output_path=output_path,
+            elapsed_s=result["elapsed_s"],
+            report=report_dict,
+            report_files=result.get("report_files"),
+        )
+    )
     return result
