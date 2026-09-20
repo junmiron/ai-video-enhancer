@@ -7,6 +7,7 @@ architecture is not covered by an existing loader). This is how the app stays
 from __future__ import annotations
 
 import json
+import sys
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -28,6 +29,17 @@ class ModelInfo:
 
 
 def default_manifest_path() -> Path:
+    # Packaged (PyInstaller onedir, M7 B): assets/ ships next to the executable
+    # (or inside _MEIPASS when bundled as data). Dev checkout: repo-relative.
+    if getattr(sys, "frozen", False):
+        candidates = []
+        meipass = getattr(sys, "_MEIPASS", None)
+        for base in (Path(sys.executable).resolve().parent, Path(meipass) if meipass else None):
+            if base is not None:
+                candidates.append(base / "assets" / "models" / "manifest.json")
+        for c in candidates:
+            if c.exists():
+                return c
     return Path(__file__).resolve().parent.parent.parent / "assets" / "models" / "manifest.json"
 
 

@@ -8,7 +8,7 @@ badges refresh when the worker reports download results.
 """
 from __future__ import annotations
 
-from PySide6.QtCore import Qt, Signal
+from PySide6.QtCore import Qt, QThread, Signal
 from PySide6.QtWidgets import (
     QCheckBox,
     QComboBox,
@@ -16,6 +16,7 @@ from PySide6.QtWidgets import (
     QGroupBox,
     QHBoxLayout,
     QLabel,
+    QPushButton,
     QRadioButton,
     QScrollArea,
     QSlider,
@@ -24,7 +25,10 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from ... import __version__ as APP_VERSION
+from ...config import APP_DISPLAY
 from ...models.registry import list_models
+from ...update import UpdateResult, check_for_updates
 from ..estimates import estimate_output_bytes, human_bytes
 from ..presets import PRESETS, PRESET_ORDER
 from ..theme import DIM
@@ -48,6 +52,20 @@ def _group(title: str) -> tuple[QGroupBox, QVBoxLayout]:
     g = QGroupBox(title)
     lay = QVBoxLayout(g)
     return g, lay
+
+
+class _UpdateChecker(QThread):
+    """Runs the update check off the GUI thread (M7 B). Emits an UpdateResult."""
+
+    done = Signal(object)  # aive.update.UpdateResult
+
+    def run(self) -> None:
+        try:
+            self.done.emit(check_for_updates(APP_VERSION))
+        except Exception as exc:  # defensive — never crash the GUI thread
+            self.done.emit(
+                UpdateResult("error", f"Unexpected error while checking for updates ({type(exc).__name__}).")
+            )
 
 
 class SettingsPage(QWidget):
@@ -274,6 +292,21 @@ class SettingsPage(QWidget):
         gl.addWidget(self.order_combo)
         lay.addWidget(g)
 
+        # -- About / updates ---------------------------------------------------
+        g, gl = _group("About")
+        ver = QLabel(f"{APP_DISPLAY} v{APP_VERSION}")
+        self.update_btn = QPushButton("Check for updates")
+        self.update_label = QLabel("")
+        self.update_label.setWordWrap(True)
+        self.update_label.setProperty("role", "dim")
+        brow = QHBoxLayout()
+        brow.addWidget(self.update_btn, 0)
+        gl.addWidget(ver)
+        gl.addLayout(brow)
+        gl.addWidget(self.update_label)
+        lay.addWidget(g)
+        self._updater: _UpdateChecker | None = None
+
         lay.addStretch(1)
         scroll.setWidget(body)
         outer.addWidget(scroll)
@@ -308,6 +341,7 @@ class SettingsPage(QWidget):
             )
         for cb in self._manual_checks.values():
             cb.toggled.connect(self._on_change)
+        self.update_btn.clicked.connect(self._check_updates)
 
     # -- model combos ---------------------------------------------------------
 
@@ -529,3 +563,21 @@ class SettingsPage(QWidget):
         self._sync_manual()
         self._update_estimate()
         self.settings_changed.emit()
+
+    # -- update check -----------------------------------------------------------
+
+    def _check_updates(self) -> None:
+        if self._updater is not None and self._updater.isRunning():
+            return  # already checking — ignore double-clicks
+        self.update_btn.setEnabled(False)
+        self.update_label.setText("Checking for updates…")
+        self._updater = _UpdateChecker(self)
+        self._updater.done.connect(self._on_update_result)
+        self._updater.start()
+
+    def _on_update_result(self, result: UpdateResult) -> None:
+        self.update_btn.setEnabled(True)
+        text = result.message
+        if result.status == "update_available" and result.download_url:
+            text += f"\nDownload: {result.download_url}"
+        self.update_label.setText(text)

@@ -123,3 +123,24 @@ def test_page_screenshots(window, qapp, tmp_path):
         qapp.processEvents()
         png = tmp_path / f"page_{name}.png"
         assert window.grab().save(str(png))
+
+
+def test_update_check_stub(window, qapp):
+    """'Check for updates' (M7 B): no server configured -> friendly stub message."""
+    import time
+
+    from aive.update import check_for_updates
+
+    # Pure-function path.
+    r = check_for_updates("0.1.0")
+    assert r.status == "not_configured"
+
+    # UI path: click -> QThread -> queued signal -> label update, button re-enabled.
+    sp = window.settings_page
+    sp._check_updates()
+    deadline = time.time() + 5.0
+    while time.time() < deadline and "No update server" not in sp.update_label.text():
+        qapp.processEvents()
+        time.sleep(0.02)
+    assert "No update server is configured" in sp.update_label.text()
+    assert sp.update_btn.isEnabled()

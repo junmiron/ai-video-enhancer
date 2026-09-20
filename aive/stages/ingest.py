@@ -7,6 +7,7 @@ import queue
 import re
 import shutil
 import subprocess
+import sys
 import threading
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -16,19 +17,48 @@ import numpy as np
 log = logging.getLogger(__name__)
 
 
+def _bundled_tool_dir() -> Path | None:
+    """Folder holding bundled ffmpeg/ffprobe for packaged builds (M7 B).
+
+    PyInstaller onedir: ``<app>/ffmpeg/`` next to the executable. Dev checkout:
+    ``<repo>/tools/ffmpeg/``. Lets the installer ship FFmpeg without touching PATH.
+    """
+    if getattr(sys, "frozen", False):
+        return Path(sys.executable).resolve().parent / "ffmpeg"
+    return Path(__file__).resolve().parents[2] / "tools" / "ffmpeg"
+
+
+def _find_tool(name: str) -> str | None:
+    exe = shutil.which(name)
+    if exe:
+        return exe
+    d = _bundled_tool_dir()
+    for suffix in (".exe", ""):  # Windows first, then POSIX
+        p = d / f"{name}{suffix}"
+        if p.exists():
+            return str(p)
+    return None
+
+
 def find_ffmpeg() -> str:
-    exe = shutil.which("ffmpeg")
+    exe = _find_tool("ffmpeg")
     if not exe:
         raise RuntimeError(
-            "ffmpeg not found on PATH. Install FFmpeg (full build) and ensure it is on PATH."
+            "ffmpeg not found on PATH or in the bundled ffmpeg folder. Install FFmpeg "
+            "(full build) and add it to PATH, or place ffmpeg.exe under tools\\ffmpeg "
+            "(dev) / <app>\\ffmpeg (installed)."
         )
     return exe
 
 
 def find_ffprobe() -> str:
-    exe = shutil.which("ffprobe")
+    exe = _find_tool("ffprobe")
     if not exe:
-        raise RuntimeError("ffprobe not found on PATH.")
+        raise RuntimeError(
+            "ffprobe not found on PATH or in the bundled ffmpeg folder. Install FFmpeg "
+            "(full build) and add it to PATH, or place ffprobe.exe under tools\\ffmpeg "
+            "(dev) / <app>\\ffmpeg (installed)."
+        )
     return exe
 
 

@@ -11,6 +11,10 @@ workspaces/
 models-cache/
 *.log
 
+# PyInstaller build output (M7 B)
+dist/
+build/
+
 # OS
 Thumbs.db
 Desktop.ini
