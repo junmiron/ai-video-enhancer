@@ -109,6 +109,47 @@ ms/call (N=15), lower is better:
   uncontended measurements — treat them as relative data points. N=15 (vs the RIFE
   table's N=30) for the same reason; medians are the stable metric.
 
+## M2M — frame interpolation throughput (M2.x)
+
+M2M is **CUDA-only** (the many-to-many splatting is an `index_add_` scatter with
+data-dependent boundary masks that ONNX cannot represent), so there is no TensorRT
+column. Measured PyTorch fp16 below UHD / fp32 at/above it (`M2MRunner`). The model
+self-pads (replicate) to a multiple of 64 internally; the "padded" column shows that
+internal pad. Re-run with `python tools/benchmark_m2m.py`.
+
+ms/call (N=30), lower is better:
+
+| Model | Resolution (padded) | Backend | Precision | Mean ms/call | Median | p95 | Calls/s |
+|---|---|---|---:|---:|---:|---:|---:|
+| m2m | 1280×720 (1280×768) | pytorch | fp16 | **191.8** ms (~5.2 calls/s) | 189.0 ms | 203.3 ms |
+| m2m | 1920×1080 (1920×1088) | pytorch | fp16 | **226.4** ms (~4.4 calls/s) | 223.0 ms | 241.9 ms |
+
+### Findings
+
+1. **M2M is the slowest FI model per call** (≈192 vs ≈101 GMFSS / ≈24 RIFE at 720p;
+   ≈226 vs ≈199 / ≈53 at 1080p). The cost is the many-to-many splat: each slot runs
+   occlusion photo-metrics plus **eight full-resolution warps** (4 branches × 2
+   directions), whereas GMFSS warps at half resolution. fp16 is safe without extra
+   guards — the checkpoint's `paramAlpha ≈ 2.9` bounds the splat exponent by e^2.9,
+   far below fp16 max; the cost volume additionally accumulates in fp32 as insurance.
+2. **The per-pair reuse cache is M2M's design advantage at high multipliers.** The
+   benchmark cycles *distinct* pairs so every timed call pays for a fresh flow
+   estimate (PWCNet bidir + MotionRefineNet) plus one splat — the realistic worst
+   case per slot. In a real 4×–8× job, consecutive intermediate slots of the same
+   pair hit the cache and pay only for photo-metrics + splat, so the amortized
+   cost-per-output-frame drops as the multiplier grows. That is why M2M is targeted
+   at high multipliers despite its higher per-call cost.
+3. **Practical throughput:** at 1080p one fresh-pair call ≈ 226 ms → a 2× job on a
+   96-frame scene needs ~95 calls ≈ 21 s of model time (vs ~4 s RIFE / ~14 s GMFSS);
+   a 4× job's later slots are cheaper than this number implies.
+
+### Caveats
+
+- These runs had a concurrent GPU workload present (a local LLM server holding most
+  of the VRAM), so absolute latency is likely somewhat higher than fully idle,
+  uncontended measurements — treat them as relative data points. N=30; medians are
+  the stable metric.
+
 ## x265 10-bit anime preset — encode defaults review (M7 A4)
 
 Reviewed the `x265-10bit-anime` final-encode preset on flat-color anime content:

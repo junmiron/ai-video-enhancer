@@ -126,13 +126,13 @@
       "task": "fi",
       "version": "v1 (CVPR'22)",
       "urls": ["https://drive.google.com/file/d/1dO-ArTLJ4cMZuN6dttIFFMLtp4I2LnSG/view?usp=sharing"],
-      "sha256": null,
+      "sha256": "b7068d9c5905ca1fd45642dd7f749c3cfbd2476c4cae6d9ffc7f1e152f3cfe93",
       "min_vram_gb": 8,
       "backends": {"cuda": true, "tensorrt": false},
       "license": "Adobe Research License (non-commercial research only; no redistribution) ⚠️",
       "recommended_for": "experimental: efficient at high multipliers (4x-8x) - motion estimated once per pair",
       "experimental": true,
-      "notes": "M2M_VFI (feinanshan). PyTorch reference implementation targets old torch/CUDA; adapter not yet implemented. Weights are a single Drive file."
+      "notes": "M2M_VFI (feinanshan), CVPR'22 many-to-many splatting. Single-file Drive download (cached as m2m.bin). Arch vendored from Test/model/; the cupy softsplat/costvol kernels are rewritten in pure torch with identical math. Runner: PyTorch-CUDA only — the softsplat splat is an index_add_ scatter with data-dependent boundary masks that ONNX cannot represent, so there is no TensorRT path (same blocker as GMFSS). Flow is estimated once per pair; each intermediate slot costs occlusion metrics + a 4-branch splat."
     },
     {
       "name": "gmfss",

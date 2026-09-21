@@ -154,6 +154,22 @@ def test_build_fi_runner_routes_gmfss(monkeypatch):
     assert calls["args"] == ("/some/dir", 1920, 1080)
 
 
+def test_build_fi_runner_routes_m2m(monkeypatch):
+    """'m2m' builds an M2MRunner, passing the single-file weights path straight through."""
+    from aive.stages.interpolate import m2m_model
+
+    calls = {}
+
+    class _Stub:
+        def __init__(self, weights_path, width, height):
+            calls["args"] = (weights_path, width, height)
+
+    monkeypatch.setattr(m2m_model, "M2MRunner", _Stub)
+    runner = build_fi_runner("m2m", "/some/file.pth", 1920, 1080)
+    assert isinstance(runner, _Stub)
+    assert calls["args"] == ("/some/file.pth", 1920, 1080)
+
+
 def test_build_fi_runner_routes_rife_variants(monkeypatch):
     """Every RIFE variant routes to RIFERunner with the right variant tag."""
     from aive.stages.interpolate import stage as st
@@ -319,6 +335,73 @@ def test_gmfss_scale_half_padding():
     frames = _moving_frames(3, w=64, h=1088)
     out = runner(frames[0], frames[2], 0.5)
     assert out.shape == (1088, 64, 3) and out.dtype == np.uint8
+
+    del runner
+    torch.cuda.empty_cache()
+
+
+# -- GPU tests (real M2M weights) -------------------------------------------
+
+
+def _m2m_weights():
+    from aive.models.downloader import download_model
+    from aive.models.registry import get_model
+
+    return download_model(get_model("m2m"))  # single .pth file
+
+
+@pytest.mark.gpu
+def test_m2m_torch_sanity():
+    """M2M (CUDA torch) end-to-end at a tiny shape + per-pair reuse cache.
+
+    96x64 -> internal replicate pad to 128x64 (the model self-pads; the runner
+    passes exact-res frames). Verifies real motion synthesis with full dynamic
+    range and that the reuse cache is keyed by pair content (same pair reuses
+    state, new pair recomputes).
+    """
+    import torch
+
+    from aive.stages.interpolate.m2m_model import M2MRunner
+
+    weights = _m2m_weights()
+    runner = M2MRunner(weights, width=96, height=64)
+    assert (runner.pw, runner.ph) == (128, 64) and not runner.uhd
+
+    frames = _moving_frames(3)
+    out = runner(frames[0], frames[2], 0.5)
+    assert out.shape == (64, 96, 3) and out.dtype == np.uint8
+    # Real motion synthesis: differs from both endpoints with full dynamic range.
+    assert not np.array_equal(out, frames[0]) and not np.array_equal(out, frames[2])
+    assert out.max() > 200 and len(np.unique(out)) > 4
+
+    key_same = runner._cache_key
+    runner(frames[0], frames[2], 0.3)
+    assert runner._cache_key == key_same
+    runner(frames[1], frames[2], 0.5)
+    assert runner._cache_key != key_same
+
+    del runner
+    torch.cuda.empty_cache()
+
+
+@pytest.mark.gpu
+def test_m2m_uhd_fp32_path():
+    """At/above UHD the runner switches to fp32 (project flicker rule, AND on both
+    dims); a non-64-multiple width exercises the internal replicate padding.
+    1936x1088 -> pad 1984x1088 (height already a multiple of 64), fp32.
+    """
+    import torch
+
+    from aive.stages.interpolate.m2m_model import M2MRunner
+
+    weights = _m2m_weights()
+    runner = M2MRunner(weights, width=1936, height=1088)
+    assert runner.uhd and (runner.pw, runner.ph) == (1984, 1088)
+    assert next(runner.model.parameters()).dtype == torch.float32
+
+    frames = _moving_frames(3, w=1936, h=1088)
+    out = runner(frames[0], frames[2], 0.5)
+    assert out.shape == (1088, 1936, 3) and out.dtype == np.uint8
 
     del runner
     torch.cuda.empty_cache()

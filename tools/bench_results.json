@@ -346,5 +346,37 @@
     "model_load_s_this_run": 0.3
    }
   ]
+ },
+ {
+  "timestamp": "2026-09-21T16:51:25+00:00",
+  "gpu": "NVIDIA GeForce RTX 5090",
+  "torch": "2.12.1+cu132",
+  "calls": 30,
+  "results": [
+   {
+    "model": "m2m",
+    "resolution": "1280x720",
+    "padded": "1280x768",
+    "backend": "pytorch",
+    "precision": "fp16",
+    "mean_ms": 191.82,
+    "median_ms": 188.97,
+    "p95_ms": 203.31,
+    "calls_per_s": 5.21,
+    "model_load_s_this_run": 0.2
+   },
+   {
+    "model": "m2m",
+    "resolution": "1920x1080",
+    "padded": "1920x1088",
+    "backend": "pytorch",
+    "precision": "fp16",
+    "mean_ms": 226.41,
+    "median_ms": 222.99,
+    "p95_ms": 241.88,
+    "calls_per_s": 4.42,
+    "model_load_s_this_run": 0.1
+   }
+  ]
  }
 ]
