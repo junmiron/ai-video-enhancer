@@ -137,15 +137,22 @@
     {
       "name": "gmfss",
       "task": "fi",
-      "version": "fortuna-union (2023)",
+      "version": "fortuna-union",
       "urls": ["https://github.com/NevermindNilas/TAS-Models-Host/releases/download/main/gmfss-fortuna-union.zip"],
-      "sha256": null,
+      "sha256": "c7aa9bbdc105de641d4ac8793f299254fef048da4a3ef119118c931b204acfdd",
       "min_vram_gb": 8,
       "backends": {"cuda": true, "tensorrt": false},
-      "license": "No license file upstream ⚠️ (personal use only)",
+      "license": "code MIT (GMFSS_Fortuna, 98mxr); weights: no license file upstream ⚠️ (personal use only)",
       "recommended_for": "experimental: anime-oriented interpolation; TAS's best-maintained community variant",
       "experimental": true,
-      "notes": "GMFSS (routineLife1/GMFSS) weights bundle as mirrored by TAS. Upstream project is archived in favor of GMFSS_Fortuna (98mxr). Requires the CUDA softsplat kernel (TAS vendors it under src/gmfss/); adapter not yet implemented."
+      "extract_members": {
+        "flownet.pkl": "flownet.pkl",
+        "rife.pkl": "rife.pkl",
+        "metric_union.pkl": "metric.pkl",
+        "feat_union.pkl": "feat.pkl",
+        "fusionnet_union.pkl": "fusionnet.pkl"
+      },
+      "notes": "GMFSS (routineLife1/GMFSS, archived) union-variant weights as mirrored by TAS; arch vendored from GMFSS_Fortuna (98mxr, MIT). The zip bundle extracts to a directory of 5 checkpoints (union names renamed to canonical). Runner: PyTorch-CUDA only — the softsplat splatting is an index_add_ scatter with data-dependent boundary masks that ONNX cannot represent, so there is no TensorRT path; fp16 below UHD / fp32 at/above it, flow computed at half res above 1080p (TAS rule), per-pair reuse cache. Weights carry no upstream license: personal use only per project decision D3."
     },
     {
       "name": "film",

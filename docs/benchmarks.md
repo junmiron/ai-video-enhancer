@@ -74,6 +74,41 @@ PyTorch 28.5 / 57.6 / 27.0 / 58.7 / 29.1 / 57.5 (same row order).
 - p95 at 1080p shows occasional ~30 ms spikes (page faults / allocator); medians
   are the stable comparison metric.
 
+## GMFSS — frame interpolation throughput (M2.x)
+
+GMFSS is **CUDA-only** (the softsplat splatting is an `index_add_` scatter with
+data-dependent boundary masks that ONNX cannot represent), so there is no TensorRT
+column. Measured PyTorch fp16 below UHD; above-1080p sources additionally run the
+flow at half resolution (`scale=0.5`) and, at/above UHD, in fp32 — both handled by
+`GMFSSRunner`. Re-run with `python tools/benchmark_gmfss.py`.
+
+ms/call (N=15), lower is better:
+
+| Model | Resolution (padded) | Backend | Precision | Flow scale | Mean ms/call | Median | p95 | Calls/s |
+|---|---|---|---|---:|---:|---:|---:|---:|
+| gmfss | 1280×720 (1280×768) | pytorch | fp16 | 1.0 | **100.9** ms (~9.9 calls/s) | 101.2 ms | 107.2 ms |
+| gmfss | 1920×1080 (1920×1088) | pytorch | fp16 | 1.0 | **198.7** ms (~5.0 calls/s) | 184.5 ms | 238.9 ms |
+
+### Findings
+
+1. **GMFSS is ~4× slower per call than RIFE at the same resolution** (≈101 vs ≈24
+   ms at 720p, ≈199 vs ≈53 ms at 1080p). It carries a GMFlow transformer plus
+   multi-scale feature extraction and three softsplat warps per frame — FLOP- and
+   memory-heavy in ways RIFE's lightweight IFNet is not. Choose RIFE for speed,
+   GMFSS when its anime-oriented quality is wanted.
+2. **The per-pair reuse cache matters**: flow + metrics + features are computed once
+   per frame pair and reused across every intermediate slot of that pair, so a 2×
+   job costs one `reuse()` plus N `inference()` calls rather than N full forwards.
+3. **Practical throughput:** at 1080p one call ≈ 199 ms → a 24→60 fps job on a
+   96-frame scene needs ~72 calls ≈ 14 s of model time (vs ~4 s for RIFE).
+
+### Caveats
+
+- These runs had a concurrent GPU workload present (a local LLM server holding most
+  of the VRAM), so absolute latency is likely somewhat higher than fully idle,
+  uncontended measurements — treat them as relative data points. N=15 (vs the RIFE
+  table's N=30) for the same reason; medians are the stable metric.
+
 ## x265 10-bit anime preset — encode defaults review (M7 A4)
 
 Reviewed the `x265-10bit-anime` final-encode preset on flat-color anime content:

@@ -185,12 +185,15 @@ def _maybe_extract(
     verified: dict,
     verified_file: Path,
 ) -> Path:
-    """Extract the configured archive member as the canonical weights file.
+    """Extract the configured archive member(s) as the canonical weights.
 
-    Returns `artifact` unchanged when ``extract_member`` is not set. The
-    extracted file gets its own entry in verified.json so re-runs skip the
-    (cheap, but unnecessary) extraction.
+    Returns `artifact` unchanged when no extraction is configured. Extracted
+    files get their own entries in verified.json so re-runs skip the (cheap,
+    but unnecessary) extraction. Multi-file bundles (``extract_members``)
+    return the directory containing all extracted checkpoints.
     """
+    if info.extract_members:
+        return _extract_members(info, base, artifact, verified, verified_file)
     if not info.extract_member:
         return artifact
     import zipfile
@@ -225,6 +228,7 @@ def cached_weights_path(info: ModelInfo, dest_dir: str | Path | None = None) -> 
 
     Pure filesystem check (no network) — the M6 UI uses it to mark models as
     ready in model lists and to decide what the first-run download offers.
+    For multi-file bundles this is the directory holding all extracted files.
     """
     from ..config import model_cache_dir
 
@@ -234,10 +238,60 @@ def cached_weights_path(info: ModelInfo, dest_dir: str | Path | None = None) -> 
     url = info.urls[0]
     direct = resolve_gdrive(url) or url
     target = base / _filename_for(direct, info.name)
+    if not target.exists():
+        return None
+    if info.extract_members:
+        outs = [base / out_name for out_name in info.extract_members.values()]
+        return base if all(p.exists() for p in outs) else None
     if info.extract_member:
         out_path = base / Path(info.extract_member).name
         return out_path if out_path.exists() else None
-    return target if target.exists() else None
+    return target
+
+
+def _extract_members(
+    info: ModelInfo,
+    base: Path,
+    artifact: Path,
+    verified: dict,
+    verified_file: Path,
+) -> Path:
+    """Extract every configured archive member (renamed per the mapping).
+
+    Returns `base` — the directory holding all extracted checkpoints. Each
+    output file is tracked in verified.json under its output name; a re-run
+    skips extraction when every output exists and matches.
+    """
+    import zipfile
+
+    pending: list[str] = []
+    for member, out_name in info.extract_members.items():
+        out_path = base / out_name
+        expected = verified.get(out_name)
+        if not (out_path.exists() and (expected is None or _sha256_file(out_path) == expected.lower())):
+            pending.append(member)
+    if not pending:
+        log.info("Extracted weights cached: %s", base)
+        return base
+
+    try:
+        with zipfile.ZipFile(artifact) as zf:
+            for member in pending:
+                out_name = info.extract_members[member]
+                data = zf.read(member)
+                tmp = (base / out_name).with_suffix(Path(out_name).suffix + ".part")
+                tmp.write_bytes(data)
+                digest = _sha256_file(tmp)
+                tmp.replace(base / out_name)
+                verified[out_name] = digest
+    except (zipfile.BadZipFile, KeyError) as exc:
+        raise DownloadError(
+            f"{info.name}: expected archive containing {pending}, got {exc}"
+        ) from exc
+
+    verified_file.write_text(json.dumps(verified, indent=1), encoding="utf-8")
+    log.info("Extracted %d member(s) -> %s", len(pending), base)
+    return base
 
 
 def _sha256_file(path: Path) -> str:

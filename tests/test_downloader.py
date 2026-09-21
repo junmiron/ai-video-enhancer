@@ -145,3 +145,68 @@ def test_all_mirrors_fail_raises(tmp_path, monkeypatch):
     )
     with pytest.raises(DownloadError, match="all mirrors tried"):
         download_model(info, dest_dir=tmp_path / "cache")
+
+
+# -- multi-file bundles (extract_members) -------------------------------------
+
+
+def test_extract_members_bundle(tmp_path, monkeypatch):
+    """Multi-file bundles extract every member (renamed per the mapping) into a dir.
+
+    Mirrors the GMFSS union bundle: some archive members keep their name, others
+    are renamed to canonical checkpoint names. download_model returns the holding
+    directory; cached_weights_path reports ready once every output exists.
+    """
+    import zipfile
+
+    payload = {
+        "flownet.pkl": b"flow-bytes",
+        "rife.pkl": b"ifnet-bytes",
+        "metric_union.pkl": b"metric-bytes",
+        "feat_union.pkl": b"feat-bytes",
+        "fusionnet_union.pkl": b"fusion-bytes",
+    }
+    src = tmp_path / "bundle.zip"
+    with zipfile.ZipFile(src, "w") as zf:
+        for name, data in payload.items():
+            zf.writestr(name, data)
+
+    monkeypatch.setattr(
+        urllib.request, "urlopen", lambda req, timeout=None: _FakeResp(src.read_bytes())
+    )
+
+    info = ModelInfo(
+        name="gmfss", task="fi", version="fortuna-union",
+        urls=["https://example.com/gmfss-fortuna-union.zip"],
+        extract_members={
+            "flownet.pkl": "flownet.pkl",
+            "rife.pkl": "rife.pkl",
+            "metric_union.pkl": "metric.pkl",
+            "feat_union.pkl": "feat.pkl",
+            "fusionnet_union.pkl": "fusionnet.pkl",
+        },
+    )
+    dest = tmp_path / "cache"
+    result = download_model(info, dest_dir=dest)
+
+    # Multi-file bundle -> the directory holding all checkpoints is returned.
+    assert result == dest
+    for out_name in ("flownet.pkl", "rife.pkl", "metric.pkl", "feat.pkl", "fusionnet.pkl"):
+        p = dest / out_name
+        assert p.exists(), f"missing extracted member {out_name}"
+    # Renamed members carry the right bytes.
+    assert (dest / "metric.pkl").read_bytes() == b"metric-bytes"
+    assert (dest / "feat.pkl").read_bytes() == b"feat-bytes"
+    assert (dest / "fusionnet.pkl").read_bytes() == b"fusion-bytes"
+
+    # cached_weights_path reports ready once every output exists.
+    from aive.models.downloader import cached_weights_path
+
+    assert cached_weights_path(info, dest_dir=dest) == dest
+
+    # Re-run is served from cache with no network and skips re-extraction.
+    def _no_network(*a, **k):
+        raise AssertionError("network accessed during cached run")
+
+    monkeypatch.setattr(urllib.request, "urlopen", _no_network)
+    assert download_model(info, dest_dir=dest) == dest

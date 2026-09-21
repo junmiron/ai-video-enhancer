@@ -1,4 +1,9 @@
-"""Frame-interpolation pipeline stage (RIFE 4.25 family).
+"""Frame-interpolation pipeline stage.
+
+Model lineup (manifest ``task: fi``): the RIFE 4.25 family (TensorRT primary,
+PyTorch-CUDA fallback) and GMFSS (M2.x; PyTorch-CUDA — its softsplat splatting
+is not ONNX-exportable, see :mod:`gmfss_model`). Additional experimental models
+(M2M, FILM) land in later M2.x commits via the same runner-builder registry.
 
 Scene-cut protection is structural: the orchestrator runs this stage once per
 scene segment, so interpolation never crosses a cut. De-duplication skips model
@@ -6,8 +11,8 @@ calls for near-identical consecutive source frames (common in anime) and fills
 their slots with copies of the previous frame — timing stays exact because slot
 counting comes from :mod:`gapplan`.
 
-Backends: TensorRT engine (primary; fp16 below UHD, fp32 at/above it per TAS's
-flicker finding) with a PyTorch-CUDA fallback for non-exportable situations.
+Backends: TensorRT engine where available (fp16 below UHD, fp32 at/above it per
+TAS's flicker finding), PyTorch-CUDA otherwise.
 """
 from __future__ import annotations
 
@@ -37,7 +42,7 @@ class InterpolateConfig:
     """User-facing interpolation settings (M6 UI maps onto this)."""
 
     enabled: bool = False
-    model: str = "rife_425"  # registry name; heavy/lite variants land with M2.x
+    model: str = "rife_425"  # manifest registry name (task: fi)
     target_fps: float | None = None  # e.g. 60.0 — wins over multiplier when set
     multiplier: int | None = None  # e.g. 2, 3, 4
     dedup_threshold: float = 0.0  # mean abs diff (0..1); 0 disables de-duplication
@@ -172,6 +177,27 @@ def load_state(weights_path: Path, model) -> None:
     apply_rife_state(model, load_rife_state_dict(weights_path))
 
 
+def build_fi_runner(model_name: str, weights_path, width: int, height: int):
+    """Runner-builder registry keyed by manifest model name (M2.x).
+
+    Each builder returns an object with the ``runner(img0, img1, t) -> HWC
+    uint8`` contract. ``weights_path`` is whatever :func:`download_model`
+    returned for that model — a file for single-checkpoint models, a directory
+    for multi-file bundles (GMFSS).
+    """
+    if model_name in RIFE_VARIANTS:
+        return RIFERunner(weights_path, width, height, variant=model_name)
+    if model_name == "gmfss":
+        from .gmfss_model import GMFSSRunner
+
+        return GMFSSRunner(weights_path, width, height)
+    known = ", ".join(sorted(RIFE_VARIANTS + ("gmfss",)))
+    raise ValueError(
+        f"Model '{model_name}' has no frame-interpolation adapter yet. "
+        f"Available: {known}."
+    )
+
+
 class InterpolateStage:
     """Pipeline stage: source frames -> interpolated frames at the target rate."""
 
@@ -196,18 +222,13 @@ class InterpolateStage:
         from ...models.registry import get_model
 
         if self._runner is None:
-            if self.cfg.model not in RIFE_VARIANTS:
-                raise ValueError(
-                    f"Model '{self.cfg.model}' is not a RIFE 4.25-family model; "
-                    "experimental FI adapters (M2M/GMFSS/FILM/AMT) land later."
-                )
             info = get_model(self.cfg.model)
             weights = download_model(info)
             log.info("Interpolation: %s @ %dx%d (target %.3ffps, dedup=%s)",
                      self.cfg.model, ctx.width, ctx.height,
                      self.cfg.output_fps(_fps_from_str(ctx.fps)),
                      f"{self.cfg.dedup_threshold:g}" if self.cfg.dedup_threshold > 0 else "off")
-            self._runner = RIFERunner(weights, ctx.width, ctx.height, variant=self.cfg.model)
+            self._runner = build_fi_runner(self.cfg.model, weights, ctx.width, ctx.height)
 
         num, den = self.cfg.ratio(_fps_from_str(ctx.fps))
         prev: np.ndarray | None = None

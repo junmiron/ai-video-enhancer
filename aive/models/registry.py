@@ -26,6 +26,7 @@ class ModelInfo:
     notes: str = ""
     experimental: bool = False  # listed in the UI but not part of the stable pipeline
     extract_member: str | None = None  # if set, the download is an archive; this member becomes the weights file
+    extract_members: dict[str, str] | None = None  # multi-file bundles: {archive member: output filename}; download_model returns the directory
 
 
 def default_manifest_path() -> Path:

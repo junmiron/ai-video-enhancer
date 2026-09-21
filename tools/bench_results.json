@@ -304,5 +304,47 @@
     "model_load_s_this_run": 0.0
    }
   ]
+ },
+ {
+  "timestamp": "2026-09-21T13:23:14+00:00",
+  "gpu": "NVIDIA GeForce RTX 5090",
+  "torch": "2.12.1+cu132",
+  "calls": 15,
+  "results": [
+   {
+    "model": "gmfss",
+    "resolution": "1280x720",
+    "padded": "1280x768",
+    "backend": "pytorch",
+    "precision": "fp16",
+    "flow_scale": 1.0,
+    "mean_ms": 100.87,
+    "median_ms": 101.24,
+    "p95_ms": 107.23,
+    "calls_per_s": 9.91,
+    "model_load_s_this_run": 0.3
+   }
+  ]
+ },
+ {
+  "timestamp": "2026-09-21T13:31:19+00:00",
+  "gpu": "NVIDIA GeForce RTX 5090",
+  "torch": "2.12.1+cu132",
+  "calls": 15,
+  "results": [
+   {
+    "model": "gmfss",
+    "resolution": "1920x1080",
+    "padded": "1920x1088",
+    "backend": "pytorch",
+    "precision": "fp16",
+    "flow_scale": 1.0,
+    "mean_ms": 198.71,
+    "median_ms": 184.47,
+    "p95_ms": 238.86,
+    "calls_per_s": 5.03,
+    "model_load_s_this_run": 0.3
+   }
+  ]
  }
 ]

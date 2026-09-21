@@ -10,7 +10,11 @@ import numpy as np
 import pytest
 
 from aive.stages.interpolate.gapplan import estimate_output_frames
-from aive.stages.interpolate.stage import InterpolateConfig, InterpolateStage
+from aive.stages.interpolate.stage import (
+    InterpolateConfig,
+    InterpolateStage,
+    build_fi_runner,
+)
 
 
 class _FakeRunner:
@@ -131,6 +135,47 @@ def test_all_chain_stages_expose_output_dims():
     assert dims == (1280, 720)  # SR x2; FI and QA preserve resolution
 
 
+# -- runner-builder dispatch (no GPU/weights) ---------------------------------
+
+
+def test_build_fi_runner_routes_gmfss(monkeypatch):
+    """'gmfss' builds a GMFSSRunner, passing the bundle directory straight through."""
+    from aive.stages.interpolate import gmfss_model
+
+    calls = {}
+
+    class _Stub:
+        def __init__(self, weights_path, width, height):
+            calls["args"] = (weights_path, width, height)
+
+    monkeypatch.setattr(gmfss_model, "GMFSSRunner", _Stub)
+    runner = build_fi_runner("gmfss", "/some/dir", 1920, 1080)
+    assert isinstance(runner, _Stub)
+    assert calls["args"] == ("/some/dir", 1920, 1080)
+
+
+def test_build_fi_runner_routes_rife_variants(monkeypatch):
+    """Every RIFE variant routes to RIFERunner with the right variant tag."""
+    from aive.stages.interpolate import stage as st
+
+    calls = {}
+
+    class _StubRife:
+        def __init__(self, weights_path, width, height, variant=None):
+            calls["variant"] = variant
+
+    monkeypatch.setattr(st, "RIFERunner", _StubRife)
+    for v in ("rife_425", "rife_425_heavy", "rife_425_lite"):
+        runner = build_fi_runner(v, "/w", 96, 64)
+        assert isinstance(runner, _StubRife) and calls["variant"] == v
+
+
+def test_build_fi_runner_unknown_model_raises():
+    """A model with no FI adapter raises a message listing what IS available."""
+    with pytest.raises(ValueError, match="no frame-interpolation adapter"):
+        build_fi_runner("mystery", "/w", 96, 64)
+
+
 # -- GPU tests (real RIFE 4.25 weights) ----------------------------------------
 
 
@@ -210,3 +255,70 @@ def test_rife_trt_engine_tiny_shape():
     assert diff.max() <= 16 and diff.mean() < 2.0, (
         f"TRT vs torch max abs diff {diff.max()} (mean {diff.mean():.3f})"
     )
+
+
+# -- GPU tests (real GMFSS union weights) -------------------------------------
+
+
+def _gmfss_weights():
+    from aive.models.downloader import download_model
+    from aive.models.registry import get_model
+
+    return download_model(get_model("gmfss"))  # directory of 5 checkpoints
+
+
+@pytest.mark.gpu
+def test_gmfss_torch_sanity():
+    """GMFSS (CUDA torch) end-to-end at a tiny shape + per-pair reuse cache.
+
+    96x64 -> pad 128x64, scale=1.0 (below the 1080p flow-downscale threshold).
+    Verifies real motion synthesis with full dynamic range and that the reuse
+    cache is keyed by pair content (same pair reuses state, new pair recomputes).
+    """
+    import torch
+
+    from aive.stages.interpolate.gmfss_model import GMFSSRunner
+
+    weights = _gmfss_weights()
+    runner = GMFSSRunner(weights, width=96, height=64)
+    assert (runner.pw, runner.ph) == (128, 64) and runner.scale == 1.0
+
+    frames = _moving_frames(3)
+    out = runner(frames[0], frames[2], 0.5)
+    assert out.shape == (64, 96, 3) and out.dtype == np.uint8
+    # Real motion synthesis: differs from both endpoints with full dynamic range.
+    assert not np.array_equal(out, frames[0]) and not np.array_equal(out, frames[2])
+    assert out.max() > 200 and len(np.unique(out)) > 4
+
+    # Per-pair reuse cache is keyed by content: same pair reuses state, a new
+    # pair recomputes (no timing dependency).
+    key_same = runner._cache_key
+    runner(frames[0], frames[2], 0.3)
+    assert runner._cache_key == key_same
+    runner(frames[1], frames[2], 0.5)
+    assert runner._cache_key != key_same
+
+    del runner
+    torch.cuda.empty_cache()
+
+
+@pytest.mark.gpu
+def test_gmfss_scale_half_padding():
+    """UHD sources run flow at half res (scale=0.5); the flownet input must stay a
+    multiple of 32 or GMFlow's split_feature asserts. Regression for pad_mod:
+    64x1088 pads to 128x1152 (a multiple of 128), not 64x1088 (which would crash).
+    """
+    import torch
+
+    from aive.stages.interpolate.gmfss_model import GMFSSRunner
+
+    weights = _gmfss_weights()
+    runner = GMFSSRunner(weights, width=64, height=1088)
+    assert runner.scale == 0.5 and (runner.pw, runner.ph) == (128, 1152)
+
+    frames = _moving_frames(3, w=64, h=1088)
+    out = runner(frames[0], frames[2], 0.5)
+    assert out.shape == (1088, 64, 3) and out.dtype == np.uint8
+
+    del runner
+    torch.cuda.empty_cache()
