@@ -1,4 +1,4 @@
-# AI Video Enhancer — one-shot build script (M7 B)
+# AI Video Enhancer - one-shot build script (M7 B)
 #
 #   powershell -ExecutionPolicy Bypass -File packaging\build.ps1
 #
@@ -19,11 +19,11 @@ $repo = Split-Path -Parent $PSScriptRoot
 Set-Location $repo
 
 if (-not $SkipPyInstaller) {
-    Write-Host "== 1/3 PyInstaller (onedir, multi-GB — this takes a while) ==" -ForegroundColor Cyan
+    Write-Host "== 1/3 PyInstaller (onedir, multi-GB - this takes a while) ==" -ForegroundColor Cyan
     & $Python -m PyInstaller packaging/aive.spec --noconfirm
     if ($LASTEXITCODE -ne 0) { throw "PyInstaller failed (exit $LASTEXITCODE)" }
 } else {
-    Write-Host "== 1/3 PyInstaller — skipped (-SkipPyInstaller) ==" -ForegroundColor Cyan
+    Write-Host "== 1/3 PyInstaller - skipped (-SkipPyInstaller) ==" -ForegroundColor Cyan
 }
 
 Write-Host "== 2/3 Bundle FFmpeg from $FfmpegDir ==" -ForegroundColor Cyan
@@ -45,7 +45,7 @@ elseif (Test-Path "C:\Program Files (x86)\Inno Setup 6\ISCC.exe") {
     $iscc = "C:\Program Files (x86)\Inno Setup 6\ISCC.exe"
 }
 if (-not $iscc) {
-    Write-Warning "ISCC not found — skipping installer. Install Inno Setup 6 (winget install JRSoftware.InnoSetup), then re-run this script or compile packaging\ai-video-enhancer.iss manually."
+    Write-Warning "ISCC not found - skipping installer. Install Inno Setup 6 (winget install JRSoftware.InnoSetup), then re-run this script or compile packaging\ai-video-enhancer.iss manually."
     return
 }
 & $iscc (Join-Path $PSScriptRoot "ai-video-enhancer.iss")
