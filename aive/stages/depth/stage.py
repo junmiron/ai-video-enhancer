@@ -232,6 +232,11 @@ class PerFrameDepthRunner:
             self._torch_model = load_dav2(weights_path, device="cuda", dtype=None).eval()
 
     def _build_trt(self, weights_path: str | Path) -> None:
+        # NOTE: torch is imported HERE (not at module level — this package keeps
+        # heavy imports lazy). A missing local import raised NameError on every
+        # build attempt and silently disabled TRT for the depth model.
+        import torch
+
         from ...inference.onnx_export import _ensure_self_contained
         from ...inference.trt import TrtRunner, build_engine, engine_cache_dir, free_vram_bytes
 

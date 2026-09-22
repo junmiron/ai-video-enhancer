@@ -202,6 +202,11 @@ class RestoreRunner:
     # -- backend setup -------------------------------------------------------
 
     def _build_trt(self, weights_path: str | Path) -> None:
+        # NOTE: torch is imported HERE (not at module level — this package keeps
+        # heavy imports lazy). A missing local import raised NameError on every
+        # build attempt and silently disabled TRT for both restore models.
+        import torch
+
         from ....inference.onnx_export import _ensure_self_contained
         from ....inference.trt import TrtRunner, build_engine, engine_cache_dir, free_vram_bytes
 
