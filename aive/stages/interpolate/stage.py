@@ -2,9 +2,9 @@
 
 Model lineup (manifest ``task: fi``): the RIFE 4.25 family (TensorRT primary,
 PyTorch-CUDA fallback), GMFSS and M2M (M2.x; PyTorch-CUDA — their softsplat
-splatting is not ONNX-exportable, see :mod:`gmfss_model` / :mod:`m2m_model`).
-The remaining experimental model (FILM) lands in a later M2.x commit via the
-same runner-builder registry.
+splatting is not ONNX-exportable, see :mod:`gmfss_model` / :mod:`m2m_model`),
+and FILM (M2.x; TensorRT fixed-shape engines per resolution, built from a
+baked TF->ONNX export with min=opt=max profiles — see :mod:`film_model`).
 
 Scene-cut protection is structural: the orchestrator runs this stage once per
 scene segment, so interpolation never crosses a cut. De-duplication skips model
@@ -196,7 +196,11 @@ def build_fi_runner(model_name: str, weights_path, width: int, height: int):
         from .m2m_model import M2MRunner
 
         return M2MRunner(weights_path, width, height)
-    known = ", ".join(sorted(RIFE_VARIANTS + ("gmfss", "m2m")))
+    if model_name == "film":
+        from .film_model import FILMRunner
+
+        return FILMRunner(weights_path, width, height)
+    known = ", ".join(sorted(RIFE_VARIANTS + ("gmfss", "m2m", "film")))
     raise ValueError(
         f"Model '{model_name}' has no frame-interpolation adapter yet. "
         f"Available: {known}."

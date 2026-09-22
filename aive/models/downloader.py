@@ -102,6 +102,38 @@ def _fetch_one(name: str, direct_url: str, part: Path, progress_cb, expected_sha
     return digest
 
 
+def _resolve_bundled(info: ModelInfo, base: Path) -> Path:
+    """Copy a locally-bundled model file into the cache (sha256-verified)."""
+    from .registry import bundled_source_path
+
+    src = bundled_source_path(info)
+    if src is None:
+        raise DownloadError(
+            f"{info.name}: bundled file '{info.bundled}' not found next to the manifest "
+            "(personal-use model; place it under assets/models/)"
+        )
+    target = base / Path(info.bundled).name
+    expected = (info.sha256 or "").lower() or None
+    if target.exists():
+        if expected is None or _sha256_file(target) == expected:
+            log.info("Bundled model cached: %s", target)
+            return target
+        raise DownloadError(f"Cache hash mismatch for bundled {target}; delete it and retry.")
+    import shutil
+
+    tmp = target.with_suffix(target.suffix + ".part")
+    shutil.copyfile(src, tmp)
+    digest = _sha256_file(tmp)
+    if expected is not None and digest != expected:
+        tmp.unlink(missing_ok=True)
+        raise DownloadError(
+            f"SHA-256 mismatch for bundled {info.name}: got {digest[:16]}…, expected {expected[:16]}…"
+        )
+    tmp.replace(target)
+    log.info("Copied bundled model %s -> %s (sha256=%s…)", src.name, target.name, digest[:16])
+    return target
+
+
 def download_model(
     info: ModelInfo,
     dest_dir: str | Path | None = None,
@@ -110,7 +142,7 @@ def download_model(
     """Download (or return cached) weights for `info`. Returns the local path."""
     from ..config import model_cache_dir
 
-    if not info.urls:
+    if not info.urls and not info.bundled:
         raise DownloadError(
             f"{info.name}: no download URLs configured "
             "(experimental model; adapter work pending)"
@@ -118,6 +150,9 @@ def download_model(
 
     base = Path(dest_dir) if dest_dir else model_cache_dir() / info.name / info.version
     base.mkdir(parents=True, exist_ok=True)
+
+    if info.bundled:
+        return _resolve_bundled(info, base)
 
     url = info.urls[0]
     direct = resolve_gdrive(url) or url
@@ -232,9 +267,13 @@ def cached_weights_path(info: ModelInfo, dest_dir: str | Path | None = None) -> 
     """
     from ..config import model_cache_dir
 
+    base = Path(dest_dir) if dest_dir else model_cache_dir() / info.name / info.version
+    if info.bundled:
+        target = base / Path(info.bundled).name
+        expected = (info.sha256 or "").lower() or None
+        return target if (target.exists() and (expected is None or _sha256_file(target) == expected)) else None
     if not info.urls:
         return None  # experimental model without a configured URL
-    base = Path(dest_dir) if dest_dir else model_cache_dir() / info.name / info.version
     url = info.urls[0]
     direct = resolve_gdrive(url) or url
     target = base / _filename_for(direct, info.name)

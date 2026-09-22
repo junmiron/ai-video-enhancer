@@ -378,5 +378,25 @@
     "model_load_s_this_run": 0.1
    }
   ]
+ },
+ {
+  "timestamp": "2026-09-22T00:23:58+00:00",
+  "gpu": "NVIDIA GeForce RTX 5090",
+  "torch": "2.12.1+cu132",
+  "calls": 30,
+  "results": [
+   {
+    "model": "film",
+    "resolution": "640x360",
+    "padded": "640x384",
+    "backend": "tensorrt",
+    "precision": "fp16",
+    "mean_ms": 27.9,
+    "median_ms": 27.63,
+    "p95_ms": 28.92,
+    "calls_per_s": 35.84,
+    "model_load_s_this_run": 0.4
+   }
+  ]
  }
 ]

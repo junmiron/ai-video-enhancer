@@ -22,3 +22,6 @@ Desktop.ini
 
 # generated demo outputs
 samples/
+
+# Locally-bundled model files (personal use; not committed)
+assets/models/bundled/

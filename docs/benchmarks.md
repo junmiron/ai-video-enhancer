@@ -150,6 +150,53 @@ ms/call (N=30), lower is better:
   uncontended measurements — treat them as relative data points. N=30; medians are
   the stable metric.
 
+## FILM — frame interpolation throughput & backend deviation (M2.x)
+
+FILM is **TensorRT-only** (TF2 model, no torch port), so there is no PyTorch
+column. The runner builds one cached fixed-shape engine per resolution from the
+bundled dynamic ONNX (min=opt=max profile — memory scales with video size like
+RIFE); each timed call is a full stateless inference (no reuse cache to amortize).
+fp16 below UHD / fp32 at/above 1080p sources (project flicker rule, same as RIFE).
+Re-run with `python tools/benchmark_film.py`.
+
+ms/call (N=30), lower is better:
+
+| Model | Resolution (padded) | Backend | Precision | Mean ms/call | Median | p95 | Calls/s |
+|---|---|---|---:|---:|---:|---:|---:|
+| film | 640×360 (640×384) | tensorrt | fp16 | **27.9** ms (~35.8 calls/s) | 27.6 ms | 28.9 ms |
+
+### Findings
+
+1. **Speed class:** ~28 ms/call @640×384 — already in the same class as RIFE's
+   ≈24 ms at *twice* the resolution (720p); M2M/GMFSS were measured at 720p+
+   (≈192 / ≈101 ms). A same-resolution comparison follows once the 720p engine can
+   be built under current VRAM constraints (see caveats).
+2. **Real-content backend deviation is sub-perceptual** (m5-demo frames, TRT-fp16
+   vs ORT-CPU fp32, both sides clamped+rounded to uint8 — what a viewer actually
+   sees):
+   - *Pure fp16 precision* (identical graph): ≤1 gray level at **every** pixel;
+     mean ≈0.008/255; 0% of pixels >1. Imperceptible.
+   - *Total*, including the TRT-mandated `round_prefer_floor` nearest sampling in
+     four FusionNet-decoder resizes: mean 0.09–0.13/255 across four frame pairs;
+     worst-case isolated-pixel spikes up to ~65–81/255 on high-frequency edges
+     (hair lines); ~1.5–1.7% of pixels >1 gray level, ~0.7% >2. The deviation is
+     deterministic per (frame pair, t) — it adds no temporal variance relative to
+     the TF original, so M4's flicker detector sees nothing new.
+   - *Measurement gotcha:* FILM's raw output legitimately exceeds [0,1] by up to
+     ~11% at edge pixels on **both** backends; comparing clamped uint8 against
+     unclamped float inflates the "fp16-only" max diff to ~29/255. The true
+     user-visible number is ≤1 — clamp both sides before comparing.
+3. **E2E:** m5-demo ×2 through the real `InterpolateStage`: 90→179 frames,
+   endpoints pixel-exact, ~35 ms/call incl. pad/H2D/D2H at 640×384.
+
+### Caveats
+
+- Concurrent GPU workload present (a local LLM server holding most of the VRAM):
+  the 720p engine build OOMs with ~2.6 GiB free, so only the 360p-class row is
+  measured; the 1280×720 / 1920×1080 rows are deferred until more VRAM frees (the
+  runner surfaces a clear error naming the requirement). N=30; medians are the
+  stable metric.
+
 ## x265 10-bit anime preset — encode defaults review (M7 A4)
 
 Reviewed the `x265-10bit-anime` final-encode preset on flat-color anime content:

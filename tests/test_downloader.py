@@ -210,3 +210,73 @@ def test_extract_members_bundle(tmp_path, monkeypatch):
 
     monkeypatch.setattr(urllib.request, "urlopen", _no_network)
     assert download_model(info, dest_dir=dest) == dest
+
+
+# -- locally-bundled model files (FILM; personal use) -------------------------
+
+
+def _bundled_fixture(tmp_path, monkeypatch, payload: bytes):
+    """Fake manifest layout <tmp>/assets/models/{manifest.json,bundled/fake.onnx}."""
+    from aive.models import registry
+
+    models_dir = tmp_path / "assets" / "models"
+    (models_dir / "bundled").mkdir(parents=True)
+    (models_dir / "bundled" / "fake.onnx").write_bytes(payload)
+    (models_dir / "manifest.json").write_text("{}", encoding="utf-8")
+    monkeypatch.setattr(registry, "default_manifest_path", lambda: models_dir / "manifest.json")
+    return models_dir
+
+
+def test_bundled_model_copied_into_cache(tmp_path, monkeypatch):
+    """A ``bundled`` model is copied from assets/models/ into the cache (sha256-verified).
+
+    No network involved; a second call is served from the cache without re-copying.
+    """
+    import hashlib
+
+    payload = b"fake-onnx-bytes"
+    models_dir = _bundled_fixture(tmp_path, monkeypatch, payload)
+    info = ModelInfo(
+        name="bundledtest", task="fi", version="1", urls=[],
+        sha256=hashlib.sha256(payload).hexdigest(),
+        bundled="bundled/fake.onnx",
+    )
+
+    from aive.models.downloader import cached_weights_path
+
+    assert cached_weights_path(info, dest_dir=tmp_path / "cache") is None  # not yet cached
+
+    dest = tmp_path / "cache"
+    path = download_model(info, dest_dir=dest)
+    assert path == dest / "fake.onnx" and path.read_bytes() == payload
+    assert cached_weights_path(info, dest_dir=dest) == path
+
+    # Cache hit: corrupting the source must not affect the already-cached copy.
+    (models_dir / "bundled" / "fake.onnx").write_bytes(b"changed-source")
+    assert download_model(info, dest_dir=dest) == path
+    assert path.read_bytes() == payload  # served from cache, not re-copied
+
+
+def test_bundled_hash_mismatch_rejected(tmp_path, monkeypatch):
+    """A bundled file whose bytes don't match the manifest sha256 is rejected cleanly."""
+    _bundled_fixture(tmp_path, monkeypatch, b"real-bytes")
+    info = ModelInfo(
+        name="bundledbad", task="fi", version="1", urls=[],
+        sha256="0" * 64, bundled="bundled/fake.onnx",
+    )
+    dest = tmp_path / "cache"
+    with pytest.raises(DownloadError, match="SHA-256 mismatch"):
+        download_model(info, dest_dir=dest)
+    leftovers = [p for p in dest.rglob("*") if p.name.endswith(".part")]
+    assert not leftovers
+
+
+def test_bundled_missing_source_rejected(tmp_path, monkeypatch):
+    """A bundled entry whose file is absent next to the manifest fails with a clear hint."""
+    _bundled_fixture(tmp_path, monkeypatch, b"real-bytes")
+    info = ModelInfo(
+        name="bundledmissing", task="fi", version="1", urls=[],
+        bundled="bundled/absent.onnx",
+    )
+    with pytest.raises(DownloadError, match="not found next to the manifest"):
+        download_model(info, dest_dir=tmp_path / "cache")

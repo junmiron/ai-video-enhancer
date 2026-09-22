@@ -159,13 +159,14 @@
       "task": "fi",
       "version": "v1 (ECCV'22)",
       "urls": [],
-      "sha256": null,
+      "sha256": "9eef9ec60b53ff8cdbacfb28a610bd7baa5f0bcc7fa4e49bf56827792fe75115",
       "min_vram_gb": 8,
-      "backends": {"cuda": true, "tensorrt": false},
-      "license": "Apache-2.0",
-      "recommended_for": "experimental: high-quality benchmark model (large motion)",
+      "backends": {"cuda": true, "tensorrt": true},
+      "license": "Apache-2.0 (google-research/frame-interpolation)",
+      "recommended_for": "experimental: high-quality benchmark model (large motion); any multiplier",
       "experimental": true,
-      "notes": "FILM (google-research/frame-interpolation). Official weights are TF2 SavedModels in a Google Drive folder (id 1q8110-qp225asX3DQvZnfLfJPkCHmDpy); no single-file URL, so download stays disabled until the adapter picks specific files. Adapter not yet implemented."
+      "bundled": "bundled/film_style_dynamic_trt.onnx",
+      "notes": "FILM (google-research/frame-interpolation, ECCV'22) Style checkpoint - the only FI model in the lineup that runs via TensorRT instead of PyTorch-CUDA (TF2 model; no torch port). Shipped as a locally-bundled TRT-ready dynamic ONNX (assets/models/bundled/, gitignored; copied into the cache on first use, sha256-verified) converted offline from the official Style SavedModel: ~13 dangling scalar inputs stripped and 4 FusionNet-decoder nearest resizes baked to constant scales=[1,1,2,2] + nearest_mode=round_prefer_floor - TRT 11 hard-rejects tf_half_pixel_for_nn with floor, so round_prefer_floor is the only TRT-supported sampling for that coordinate mode (on real smooth content it deviates from exact TF nearest by well under a gray level on average). One cached fixed-shape engine per resolution (built from the dynamic ONNX with a min=opt=max profile, so memory scales with video size like RIFE); inputs are NHWC x0/x1 + scalar time in (0,1), output is full-res and unclamped. Any interpolation multiplier works (continuous timestep like RIFE). fp16 below UHD, fp32 at/above 1080p sources (project flicker rule)."
     },
     {
       "name": "amt_sicdia",

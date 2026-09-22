@@ -27,6 +27,7 @@ class ModelInfo:
     experimental: bool = False  # listed in the UI but not part of the stable pipeline
     extract_member: str | None = None  # if set, the download is an archive; this member becomes the weights file
     extract_members: dict[str, str] | None = None  # multi-file bundles: {archive member: output filename}; download_model returns the directory
+    bundled: str | None = None  # personal-use local model file (path relative to assets/models/); copied into cache instead of downloaded
 
 
 def default_manifest_path() -> Path:
@@ -42,6 +43,14 @@ def default_manifest_path() -> Path:
             if c.exists():
                 return c
     return Path(__file__).resolve().parent.parent.parent / "assets" / "models" / "manifest.json"
+
+
+def bundled_source_path(info: "ModelInfo") -> Path | None:
+    """Local path of a ``bundled`` model file (relative to assets/models/), or None."""
+    if not info.bundled:
+        return None
+    p = (default_manifest_path().parent / info.bundled).resolve()
+    return p if p.exists() else None
 
 
 def load_manifest(path: str | Path | None = None) -> dict[str, ModelInfo]:
