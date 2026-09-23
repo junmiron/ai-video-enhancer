@@ -215,6 +215,7 @@ class InterpolateStage:
     def __init__(self, cfg: InterpolateConfig):
         self.cfg = cfg
         self._runner: RIFERunner | None = None
+        self._runner_dims: tuple[int, int] | None = None  # (w, h) the runner was built for; None = injected externally
         self.model_calls = 0
         self.dedup_skips = 0
 
@@ -227,24 +228,13 @@ class InterpolateStage:
     def process(self, frames: Iterator[np.ndarray], ctx) -> Iterator[np.ndarray]:
         import torch  # noqa: F401 - ensure CUDA context is up before first model use
 
-        from ...models.downloader import download_model
-        from ...models.registry import get_model
-
-        if self._runner is None:
-            info = get_model(self.cfg.model)
-            weights = download_model(info)
-            log.info("Interpolation: %s @ %dx%d (target %.3ffps, dedup=%s)",
-                     self.cfg.model, ctx.width, ctx.height,
-                     self.cfg.output_fps(_fps_from_str(ctx.fps)),
-                     f"{self.cfg.dedup_threshold:g}" if self.cfg.dedup_threshold > 0 else "off")
-            self._runner = build_fi_runner(self.cfg.model, weights, ctx.width, ctx.height)
-
         num, den = self.cfg.ratio(_fps_from_str(ctx.fps))
         prev: np.ndarray | None = None
         prev_pos = 0
         ctl = getattr(ctx, "control", None)
         for cur_pos, frame in enumerate(frames):
             check_control(ctl)  # M6: pause/cancel takes effect within one source frame
+            self._ensure_runner(frame, ctx)
             if prev is None:
                 yield frame
                 prev = frame
@@ -269,6 +259,36 @@ class InterpolateStage:
             yield frame
             prev = frame
             prev_pos = cur_pos
+
+
+    def _ensure_runner(self, frame: np.ndarray, ctx) -> None:
+        """Lazily build the FI runner from the first real input frame.
+
+        The working resolution must match the frames actually flowing into this
+        stage — source resolution in fi_first order, but the UPSCALED target when
+        this stage runs after upscale (sr_first). ctx always carries source dims,
+        so it cannot be used here. A runner injected externally (tests) with
+        ``_runner_dims`` left as None is trusted as-is; a production-built runner
+        is rebuilt if the input resolution changes mid-stream.
+        """
+        from ...models.downloader import download_model
+        from ...models.registry import get_model
+
+        h, w = frame.shape[:2]
+        if self._runner is not None and (self._runner_dims is None or self._runner_dims == (w, h)):
+            return
+        info = get_model(self.cfg.model)
+        weights = download_model(info)
+        log.info("Interpolation: %s @ %dx%d (target %.3ffps, dedup=%s)",
+                 self.cfg.model, w, h,
+                 self.cfg.output_fps(_fps_from_str(ctx.fps)),
+                 f"{self.cfg.dedup_threshold:g}" if self.cfg.dedup_threshold > 0 else "off")
+        if self._runner is not None:
+            ow, oh = self._runner_dims
+            log.warning("InterpolateStage: input resolution changed %dx%d -> %dx%d; rebuilding runner",
+                        ow, oh, w, h)
+        self._runner = build_fi_runner(self.cfg.model, weights, w, h)
+        self._runner_dims = (w, h)
 
 
 def _fps_from_str(fps: str) -> float:

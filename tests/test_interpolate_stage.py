@@ -120,6 +120,38 @@ def test_stage_dedup_threshold_zero_disables():
     assert fake.calls == 3  # every interval still costs a model call
 
 
+def test_stage_builds_runner_at_input_resolution_sr_first(monkeypatch):
+    """Regression guard for sr_first order (upscale before interpolate).
+
+    The runner must be built at the resolution of the frames actually flowing
+    into the stage — here 2x ctx's source dims, as they would be after an
+    upstream upscale. Building it from ctx dims crashed GMFSS._pad with a
+    broadcast error on a real run (320x240 runner fed 640x480 frames).
+    """
+    import aive.models.downloader as dl
+    import aive.models.registry as reg
+    import aive.stages.interpolate.stage as st
+
+    built = {}
+
+    def fake_build(model_name, weights_path, width, height):
+        built["dims"] = (width, height)
+        return _FakeRunner()
+
+    monkeypatch.setattr(st, "build_fi_runner", fake_build)
+    monkeypatch.setattr(dl, "download_model", lambda info: None)  # no real download
+    monkeypatch.setattr(reg, "get_model", lambda name: type("Info", (), {"name": name})())
+
+    stage = InterpolateStage(InterpolateConfig(enabled=True, model="gmfss", multiplier=2))
+    src = _moving_frames(4, w=128, h=96)  # "upscaled" frames: 2x the ctx source dims
+    out = list(stage.process(iter(src), _Ctx(width=64, height=48)))
+
+    assert built["dims"] == (128, 96), (
+        f"runner built at {built['dims']}, expected frame dims (128, 96) not ctx dims"
+    )
+    assert len(out) == estimate_output_frames(4, 2, 1)
+
+
 def test_all_chain_stages_expose_output_dims():
     """Regression guard for run_pipeline's dimension folding.
 
