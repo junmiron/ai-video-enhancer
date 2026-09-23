@@ -23,7 +23,7 @@ from __future__ import annotations
 
 import logging
 from collections import deque
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import Iterator
 
 import numpy as np
@@ -253,6 +253,7 @@ class QAStage:
                 repaired = False
                 method = "detect-only"
                 after_metric = None
+                rejected_methods: list[str] = []
 
                 if cfg.mode != "detect_only":
                     mask_full = upsample_mask(mask_proxy, fw, fh)
@@ -265,15 +266,12 @@ class QAStage:
                         center_proxy=center_proxy,
                         ai_repairs=cfg.ai_repairs,
                     )
-                    new_frame, method = run_repair(art, rctx)
-                    if method != "none":
-                        out_frame = new_frame
-                        repaired = True
-                        # Verify: re-run the same detector with ONLY this frame replaced
-                        # by its repaired version (neighbors unchanged), so the delta is
+                    def _verify(frame_u8: np.ndarray) -> float:
+                        # Re-run the same detector with ONLY this frame replaced by its
+                        # repaired version (neighbors unchanged), so the delta is
                         # attributable to the repair.
+                        rep_proxy = to_proxy(frame_u8, pw, ph)
                         wp2 = list(wp)
-                        rep_proxy = to_proxy(new_frame, pw, ph)
                         wp2[center_pos] = rep_proxy
                         win2 = FrameWindow(
                             center=rep_proxy,
@@ -288,7 +286,32 @@ class QAStage:
                             is_interpolated=self._is_interp(gidx),
                             recent_iqa=list(iqa_hist),
                         )
-                        _, after_metric = run_detector(art, win2, sens)
+                        _, m = run_detector(art, win2, sens)
+                        return float(m)
+
+                    new_frame, method = run_repair(art, rctx)
+                    if method != "none":
+                        after_metric = _verify(new_frame)
+                        # Q2 verify gate: keep the repair only when it measurably improves
+                        # the metric (>= 2% relative). Otherwise retry once with the
+                        # CV-only fallback chain (e.g. scunet -> temporal-smooth, deepdeband-f
+                        # -> deband-dither); if that also fails, emit the original frame.
+                        if not after_metric <= before_metric * 0.98:
+                            rejected_methods.append(method)
+                            after_metric = None
+                            if rctx.ai_repairs:
+                                new_frame2, method2 = run_repair(art, replace(rctx, ai_repairs=False))
+                                if method2 != "none" and method2 != method:
+                                    after2 = _verify(new_frame2)
+                                    if after2 <= before_metric * 0.98:
+                                        new_frame, method, after_metric = new_frame2, method2, after2
+                                    else:
+                                        rejected_methods.append(method2)
+                        if after_metric is not None:
+                            out_frame = new_frame
+                            repaired = True
+                        else:
+                            method = "none"  # nothing applied; attempts in rejected_methods
 
                 finding = Finding(
                     artifact=art,
@@ -298,8 +321,9 @@ class QAStage:
                     region_area_frac=float(np.clip(mask_proxy, 0.0, 1.0).mean()),
                     repaired=repaired,
                     method=method,
-                    before_metric=before_metric,
+                    before_metric=None if after_metric is None else before_metric,
                     after_metric=None if after_metric is None else float(after_metric),
+                    rejected_methods=rejected_methods,
                 )
                 report.findings.append(finding)
 

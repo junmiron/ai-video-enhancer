@@ -64,6 +64,7 @@ class Finding:
     method: str = ""  # repair applied, or "detect-only" / "none"
     before_metric: float | None = None  # detector metric pre-repair (verify baseline)
     after_metric: float | None = None  # detector metric post-repair
+    rejected_methods: list[str] = field(default_factory=list)  # repairs attempted but rejected by the verify gate
 
     @property
     def improved(self) -> bool:
@@ -146,6 +147,7 @@ class QAReport:
                     "method": f.method,
                     "before_metric": None if f.before_metric is None else round(f.before_metric, 4),
                     "after_metric": None if f.after_metric is None else round(f.after_metric, 4),
+                    "rejected_methods": list(f.rejected_methods),
                 }
                 for f in self.findings
             ],
@@ -181,6 +183,7 @@ def report_from_dict(d: dict) -> QAReport:
                 method=f.get("method", ""),
                 before_metric=f.get("before_metric"),
                 after_metric=f.get("after_metric"),
+                rejected_methods=list(f.get("rejected_methods", [])),
             )
         )
     return rep

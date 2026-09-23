@@ -98,6 +98,46 @@ def test_detect_only_mode_reports_but_does_not_modify():
     assert all(not f.repaired and f.method == "detect-only" for f in flicker_findings)
 
 
+def test_verify_gate_rejects_worsening_repair(monkeypatch):
+    """Q2: a repair that fails to improve the metric is rejected — the original
+    frame is emitted and the attempt is recorded transparently in the finding."""
+    import aive.stages.qa.repairs as repairs_mod
+    from aive.stages.qa.inject import inject_flicker
+
+    stage = QAStage(QAConfig())
+    inputs = _frames(7, seed=12)
+    inj = inject_flicker(inputs, (200, 100, 160, 120), amp=48.0, seed=3)
+
+    real_repair = repairs_mod.repair
+
+    def bad_repair(art, ctx):
+        if art.value == "flicker":
+            # A "repair" that maximizes temporal noise inside the mask region —
+            # guaranteed to worsen the flicker metric.
+            f = ctx.frame.copy()
+            rng = np.random.default_rng(99)
+            m = ctx.mask > 0.5
+            if m.any():
+                f[m] = rng.integers(0, 256, size=(int(m.sum()), 3), dtype=np.uint8)
+            return f, "bad-flicker-fix"
+        return real_repair(art, ctx)
+
+    monkeypatch.setattr(repairs_mod, "repair", bad_repair)
+    out = list(stage.process(iter(inj.frames), FakeCtx()))
+
+    flick = [f for f in stage.report.findings if f.artifact.value == "flicker"]
+    assert flick, "injected flicker should be detected"
+    # Every worsening attempt must be rejected: nothing applied, attempts recorded.
+    assert all(not f.repaired and f.method == "none" for f in flick)
+    assert all(f.rejected_methods == ["bad-flicker-fix"] for f in flick)
+    assert all(f.before_metric is None and f.after_metric is None for f in flick)
+
+    # The original frame must be emitted (except where another artifact's repair was kept).
+    kept_elsewhere = {f.frame_index for f in stage.report.findings if f.repaired}
+    for i in {f.frame_index for f in flick} - kept_elsewhere:
+        assert out[i] is inj.frames[i], "worsening repair must not be emitted"
+
+
 def test_output_dims_identity():
     stage = QAStage(QAConfig())
     ctx = FakeCtx(w=1920, h=1080)
