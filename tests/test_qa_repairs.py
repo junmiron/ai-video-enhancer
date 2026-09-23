@@ -142,6 +142,46 @@ def test_color_repair_matches_scene_palette():
     assert d_after < d_before
 
 
+def test_color_repair_coefficients_stable_across_window():
+    # Q4: every frame in one temporal window must receive the SAME correction
+    # (window-median coefficients). A per-frame fit chases a legitimate lighting
+    # ramp — consecutive flagged frames get different gains and pump. Here two
+    # centers of the same 7-frame ramp+noise window are repaired; the implied
+    # per-channel slope (out = a*in + c, strength 0.7) must be nearly identical.
+    rng = np.random.default_rng(11)
+    base = rng.integers(40, 160, size=(48, 64, 3)).astype(np.float32) / 255.0
+    frames = []
+    for t in range(7):
+        f = base * (1.0 + 0.06 * t)
+        f += rng.normal(0, 0.01, size=f.shape).astype(np.float32)
+        frames.append(np.clip(f, 0.0, 1.0))
+    ref_u8 = np.clip(frames[0] * 255, 0, 255).astype(np.uint8)  # scene reference
+    win_u8 = [np.clip(fr * 255, 0, 255).astype(np.uint8) for fr in frames]
+
+    def repair_at(idx: int) -> np.ndarray:
+        ctx = RepairContext(
+            frame=win_u8[idx], mask=np.ones((48, 64), dtype=np.float32),
+            window=list(win_u8), center_idx=idx,
+            scene_ref_proxy=to_proxy(ref_u8, 64, 48),
+            center_proxy=to_proxy(win_u8[idx], 64, 48),
+        )
+        out, method = repair(ArtifactType.COLOR_DRIFT, ctx)
+        assert method == "color-match"
+        return out
+
+    slopes = []
+    for idx in (2, 4):
+        out = repair_at(idx)
+        a = np.array([
+            float(np.polyfit(win_u8[idx][..., c].ravel().astype(float), out[..., c].ravel().astype(float), 1)[0])
+            for c in range(3)
+        ])
+        slopes.append(a)
+    # Same window -> same median coefficients. A per-frame (legacy) fit would
+    # differ by ~0.07 slope between these two ramp positions.
+    assert np.abs(slopes[0] - slopes[1]).max() < 0.01, f"coefficients pump: {slopes}"
+
+
 def test_regression_repair_stabilizes_outlier_frame():
     rng = np.random.default_rng(5)
     base = (rng.integers(80, 180, size=(48, 64, 3))).astype(np.uint8)
