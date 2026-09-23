@@ -152,6 +152,53 @@ def test_ghosting_ignores_non_interpolated_frames():
     assert sev == 0.0 and not mask.any()
 
 
+def _fast_pan_frames(v: float) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """Uniform fast pan (Q5): blurred-noise texture shifted ±v px around center.
+
+    Fast uniform motion raises dual-diff in thin bands along moving edges; the
+    ghosting detector must stay quiet on it. (The Q3 `_pan_fixture` is a slow
+    0.4 px/frame pan for flicker — too gentle to exercise this path.)
+    """
+    h, w = 96, 128
+    rng = np.random.default_rng(7)
+    n = rng.random((h, w)).astype(np.float32)
+    n = cv2.GaussianBlur(n[:, :, None], (9, 9), 1.5)
+    lo, hi = float(n.min()), float(n.max())
+    n = 0.1 + 0.8 * (n - lo) / (hi - lo)
+    base = np.repeat(n[:, :, None], 3, axis=2).astype(np.float32)
+    gx, gy = np.meshgrid(np.arange(w), np.arange(h))
+    mapy = gy.astype(np.float32)
+
+    def shifted(dx: float) -> np.ndarray:
+        return cv2.remap(
+            base, (gx - dx).astype(np.float32), mapy,
+            interpolation=cv2.INTER_LINEAR, borderMode=cv2.BORDER_WRAP,
+        )
+
+    return shifted(-v), base.copy(), shifted(v)
+
+
+def test_ghosting_quiet_for_uniform_fast_motion():
+    # Q5: uniform fast motion must not be flagged as ghosting — dual-diff there is
+    # confined to thin bands along moving edges, narrower than the motion scale.
+    for v in (2.0, 4.0):
+        prev, center, nxt = _fast_pan_frames(v)
+        win = _win([prev, center, nxt], center_idx=1, is_interpolated=True)
+        mask, sev = detect(ArtifactType.GHOSTING, win, sens=0.6)
+        assert sev < 0.15, f"uniform pan v={v} flagged as ghosting: sev={sev:.3f}"
+
+
+def test_ghosting_still_flags_solid_blob_during_pan():
+    # Guard against over-correction of the Q5 motion-width gate: a solid ghost
+    # region wider than the motion scale must be caught even while the rest of
+    # the frame pans.
+    prev, center, nxt = _fast_pan_frames(2.5)
+    center[28:68, 39:89] = np.array([250, 30, 210], dtype=np.float32) / 255.0
+    win = _win([prev, center, nxt], center_idx=1, is_interpolated=True)
+    mask, sev = detect(ArtifactType.GHOSTING, win, sens=0.6)
+    assert sev > 0.4, f"solid ghost on pan missed: sev={sev:.3f}"
+
+
 # -- banding ------------------------------------------------------------------
 
 
