@@ -7,11 +7,14 @@ their thresholds are tuned.
 """
 from __future__ import annotations
 
+import cv2
 import numpy as np
 import pytest
 
 from aive.stages.qa.detectors import detect, FrameWindow
+from aive.stages.qa.detectors.base import luma
 from aive.stages.qa.findings import ArtifactType
+from aive.stages.qa.motion import flow_field
 
 
 def _win(frames, center_idx=3, **kw):
@@ -52,6 +55,74 @@ def test_flicker_quiet_for_identical_frames():
     frames = [base.copy() for _ in range(7)]
     _, sev = detect(ArtifactType.FLICKER, _win(frames), sens=0.7)
     assert sev < 0.1
+
+
+def _pan_fixture():
+    """Slow-pan fixture (Q3): high-contrast blurred texture panned at 0.4 px/frame.
+
+    At 30 fps output a gentle pan moves < 0.5 px/frame, so it slips under the
+    low-flow gate and raw per-pixel temporal std looks like flicker to the legacy
+    path — exactly what flooded real runs with hundreds of consecutive flagged
+    frames. Returns ``(frames, flows, mags)`` for a 9-frame window (center idx 4).
+    """
+    h, w = 96, 128
+    rng = np.random.default_rng(7)
+    n = rng.random((h, w)).astype(np.float32)
+    n = cv2.GaussianBlur(n[:, :, None], (9, 9), 1.5)
+    lo, hi = float(n.min()), float(n.max())
+    n = 0.1 + 0.8 * (n - lo) / (hi - lo)
+    base = np.repeat(n[:, :, None], 3, axis=2).astype(np.float32)
+    gx, gy = np.meshgrid(np.arange(w), np.arange(h))
+    mapy = gy.astype(np.float32)
+    frames = []
+    for k in range(9):
+        mapx = (gx - 0.4 * k).astype(np.float32)
+        frames.append(
+            cv2.remap(base, mapx, mapy, interpolation=cv2.INTER_LINEAR, borderMode=cv2.BORDER_WRAP)
+        )
+    flows = [flow_field(luma(frames[i]), luma(frames[i + 1])) for i in range(8)]
+    mags = [np.sqrt(np.sum(f * f, axis=2)).astype(np.float32) for f in flows]
+    return frames, flows, mags
+
+
+def test_flicker_slow_pan_flagged_by_legacy_raw_std():
+    # Documents the Q3 bug: without flow fields (legacy fallback path), a slow pan
+    # at 0.4 px/frame is below the low-flow gate and raw temporal std flags it as
+    # flicker. Kept so any regression that makes the legacy path *quieter* on real
+    # motion is visible, and to anchor the MC test's contrast.
+    frames, flows, mags = _pan_fixture()
+    win = _win(frames, 4, mags=mags)
+    _, sev = detect(ArtifactType.FLICKER, win, sens=0.7)
+    assert sev > 0.3
+
+
+def test_flicker_motion_compensated_quiet_for_slow_pan():
+    # Q3 fix: with per-pair flow fields the detector warps each window frame onto
+    # the center before measuring variance; a pan is compensated away (residual ~0)
+    # and no finding is recorded.
+    frames, flows, mags = _pan_fixture()
+    win = _win(frames, 4, mags=mags, flows=flows)
+    _, sev = detect(ArtifactType.FLICKER, win, sens=0.7)
+    assert sev < 0.15
+
+
+def test_flicker_mc_does_not_suppress_true_static_flicker():
+    # Zero-flow window: motion compensation must be a no-op (warp ~ identity), so
+    # genuine static-region flicker keeps its full severity under the MC path.
+    rng = np.random.default_rng(1)
+    base = np.full((96, 128, 3), 0.5, dtype=np.float32)
+    frames = []
+    for _ in range(7):
+        f = base.copy()
+        f[24:64, 32:96] += rng.normal(0, 0.15, size=(40, 64, 3))
+        frames.append(np.clip(f, 0, 1).astype(np.float32))
+    zero_flows = [np.zeros((96, 128, 2), dtype=np.float32) for _ in range(6)]
+    zero_mags = [np.zeros((96, 128), dtype=np.float32) for _ in range(6)]
+    win = _win(frames, 3, mags=zero_mags, flows=zero_flows)
+    mask, sev = detect(ArtifactType.FLICKER, win, sens=0.7)
+    assert sev > 0.3
+    # the noisy box should be flagged more than a clean corner
+    assert mask[24:64, 32:96].mean() > mask[0:16, 0:16].mean()
 
 
 # -- ghosting -----------------------------------------------------------------

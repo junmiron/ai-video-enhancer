@@ -6,6 +6,18 @@ measure the temporal standard deviation of luma over a short window and flag
 regions whose variance exceeds an adaptive threshold — but only inside *low-flow*
 regions (real motion is excluded via the optical-flow mask), which is what keeps
 this from lighting up on legitimate movement.
+
+**Motion compensation (Q3):** raw per-pixel temporal std cannot distinguish
+"SR re-hallucinating a static texture" from "a slow camera pan carrying texture
+through fixed pixels". At 30 fps output even gentle pans move < 0.5 px/frame and
+slip under the low-flow gate, so whole panning shots were flagged as flicker
+(observed on real anime: runs of hundreds of consecutive frames, severity
+saturated). The fix warps every window frame onto the center frame using the
+accumulated Farneback flow before measuring variance: a pan is compensated away
+(residual ~0) while true static-region hallucination has no motion to compensate
+(warp ~ identity, full variance remains). When per-pair flow fields are not
+available (``win.flows`` empty — e.g. synthetic test windows) the detector falls
+back to raw temporal std, preserving legacy behavior.
 """
 from __future__ import annotations
 
@@ -25,11 +37,51 @@ _FLOW_THRESH = 0.5  # px of displacement considered "static"
 MIN_COMPONENT_PX = 64
 
 
+def _compensated_std(lumas: np.ndarray, flows: list[np.ndarray], center_idx: int) -> np.ndarray:
+    """Temporal std of luma after warping each frame onto the center frame.
+
+    ``lumas`` is [T,H,W] float32; ``flows[i]`` is the forward-in-time displacement
+    field (frame i -> i+1), [H,W,2]. For a frame before the center we sample it at
+    ``p - disp(p)`` (its content moved forward by ``disp``); for a frame after the
+    center we sample at ``p + disp(p)``. First-order sampling is accurate for the
+    small displacements this gate targets (< a few px).
+    """
+    T, h, w = lumas.shape
+    c = max(0, min(center_idx, T - 1))
+    gx, gy = np.meshgrid(np.arange(w, dtype=np.float32), np.arange(h, dtype=np.float32))
+    warped = np.empty_like(lumas)
+    for t in range(T):
+        if t == c:
+            warped[t] = lumas[t]
+            continue
+        lo, hi = (t, c) if t < c else (c, t)
+        disp = np.zeros((h, w, 2), dtype=np.float32)
+        for i in range(lo, hi):
+            disp += flows[i]
+        if t < c:
+            mapx, mapy = gx - disp[..., 0], gy - disp[..., 1]
+        else:
+            mapx, mapy = gx + disp[..., 0], gy + disp[..., 1]
+        warped[t] = cv2.remap(
+            lumas[t], mapx, mapy, interpolation=cv2.INTER_LINEAR, borderMode=cv2.BORDER_REPLICATE
+        )
+    return warped.std(axis=0).astype(np.float32)
+
+
 def detect(win: FrameWindow, sens: float) -> tuple[np.ndarray, float]:
     """Return (region mask [H,W] in [0,1], severity in [0,1]) for the center frame."""
     frames = win.window if len(win.window) >= 3 else ([win.center] * 3)
     lumas = np.stack([luma(f) for f in frames[:9]], axis=0)  # [T,H,W]
-    std_t = lumas.std(axis=0).astype(np.float32)
+    T = lumas.shape[0]
+
+    flows = list(win.flows or [])[: T - 1]
+    if len(flows) == T - 1 and all(
+        np.asarray(f).shape == (lumas.shape[1], lumas.shape[2], 2) for f in flows
+    ):
+        c = win.center_idx if win.center_idx is not None else T // 2
+        std_t = _compensated_std(lumas, flows, c)
+    else:
+        std_t = lumas.std(axis=0).astype(np.float32)
 
     static = static_mask(win.mags, thresh=_FLOW_THRESH) if win.mags else np.ones_like(std_t)
 

@@ -138,7 +138,7 @@ class QAStage:
         from .detectors import detect as run_detector
         from .detectors.base import FrameWindow, luma
         from .findings import ArtifactType, Finding, QAReport
-        from .motion import flow_magnitude
+        from .motion import flow_field
         from .proxy import proxy_dims, to_proxy, upsample_mask
         from .repairs import repair as run_repair
         from .repairs.base import RepairContext
@@ -180,7 +180,7 @@ class QAStage:
         buf_gidx: list[int] = []
         scene_ref = None  # first processed proxy frame of this segment (color drift ref)
         iqa_hist: deque[float] = deque(maxlen=32)  # prior per-frame IQA scores (regression)
-        mag_cache: dict[int, np.ndarray] = {}
+        flow_cache: dict[int, np.ndarray] = {}  # gidx -> [H,W,2] forward flow field
         sampled_arts: set[str] = set()  # artifact types already captured as a report thumbnail
         seg_frames = 0  # frames processed in THIS segment (report accumulates across segments)
 
@@ -194,19 +194,21 @@ class QAStage:
             )
         report = self.report
 
-        def _mags(wp: list[np.ndarray], wg: list[int]) -> list[np.ndarray]:
-            out = []
+        def _flows(wp: list[np.ndarray], wg: list[int]) -> tuple[list[np.ndarray], list[np.ndarray]]:
+            """Per-consecutive-pair flow fields [H,W,2] (cached) + derived magnitudes."""
+            flows = []
             for i in range(len(wp) - 1):
                 key = wg[i]
-                m = mag_cache.get(key)
-                if m is None:
-                    m = flow_magnitude(luma(wp[i]), luma(wp[i + 1]))
-                    mag_cache[key] = m
-                out.append(m)
+                f = flow_cache.get(key)
+                if f is None:
+                    f = flow_field(luma(wp[i]), luma(wp[i + 1]))
+                    flow_cache[key] = f
+                flows.append(f)
             minkey = (wg[0] - 2) if wg else 0
-            for k in [k for k in mag_cache if k < minkey]:
-                del mag_cache[k]
-            return out
+            for k in [k for k in flow_cache if k < minkey]:
+                del flow_cache[k]
+            mags = [np.sqrt(np.sum(f * f, axis=2)).astype(np.float32) for f in flows]
+            return flows, mags
 
         def _process_center(center_pos: int, gidx: int):
             nonlocal scene_ref, seg_frames
@@ -221,6 +223,7 @@ class QAStage:
 
             src_center = src_provider.for_proc_index(gidx) if src_provider is not None else None
 
+            flows, mags = _flows(wp, buf_gidx)
             win = FrameWindow(
                 center=center_proxy,
                 prev=wp[center_pos - 1] if center_pos > 0 else None,
@@ -228,7 +231,9 @@ class QAStage:
                 window=wp,
                 src_center=src_center,
                 scene_ref=scene_ref,
-                mags=_mags(wp, buf_gidx),
+                mags=mags,
+                flows=flows,
+                center_idx=center_pos,
                 is_interpolated=self._is_interp(gidx),
                 recent_iqa=list(iqa_hist),
             )
@@ -278,6 +283,8 @@ class QAStage:
                             src_center=src_center,
                             scene_ref=scene_ref,
                             mags=win.mags,
+                            flows=win.flows,
+                            center_idx=center_pos,
                             is_interpolated=self._is_interp(gidx),
                             recent_iqa=list(iqa_hist),
                         )

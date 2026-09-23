@@ -22,19 +22,28 @@ def _to_u8(gray: np.ndarray) -> np.ndarray:
     return (np.clip(g, 0.0, 1.0) * 255.0).astype(np.uint8)
 
 
+def flow_field(prev_gray: np.ndarray, next_gray: np.ndarray) -> np.ndarray:
+    """Per-pixel displacement vector (in pixels) between two grayscale frames.
+
+    Inputs may be float [0,1] or uint8; they are normalized internally. Returns a
+    ``[H,W,2]`` float32 field where ``(dx, dy)`` is the motion of the pixel at that
+    location in ``prev_gray`` as it appears in ``next_gray`` (forward-in-time).
+    """
+    p = _to_u8(prev_gray)
+    n = _to_u8(next_gray)
+    return cv2.calcOpticalFlowFarneback(
+        p, n, None, 0.5, 3, 21, 3, 5, 1.2, flags=cv2.OPTFLOW_FARNEBACK_GAUSSIAN
+    ).astype(np.float32)
+
+
 def flow_magnitude(prev_gray: np.ndarray, next_gray: np.ndarray) -> np.ndarray:
     """Per-pixel displacement magnitude (in pixels) between two grayscale frames.
 
     Inputs may be float [0,1] or uint8; they are normalized internally. Returns a
     single-channel float32 array of the same spatial size as the inputs.
     """
-    p = _to_u8(prev_gray)
-    n = _to_u8(next_gray)
-    flow = cv2.calcOpticalFlowFarneback(
-        p, n, None, 0.5, 3, 21, 3, 5, 1.2, flags=cv2.OPTFLOW_FARNEBACK_GAUSSIAN
-    )
-    mag = np.sqrt(flow[..., 0] ** 2 + flow[..., 1] ** 2)
-    return mag.astype(np.float32)
+    f = flow_field(prev_gray, next_gray)
+    return np.sqrt(f[..., 0] ** 2 + f[..., 1] ** 2).astype(np.float32)
 
 
 def static_mask(mags: list[np.ndarray], thresh: float = 0.5) -> np.ndarray:

@@ -29,6 +29,8 @@ class FrameWindow:
     src_center: np.ndarray | None = None  # source reference for this time (ground truth)
     scene_ref: np.ndarray | None = None  # scene reference frame (color drift)
     mags: list[np.ndarray] = field(default_factory=list)  # flow mag between consecutive window frames
+    flows: list[np.ndarray] = field(default_factory=list)  # [H,W,2] flow vectors, same order as mags
+    center_idx: int | None = None  # index of `center` within `window`; None -> middle (symmetric windows)
     is_interpolated: bool = False  # True if the center frame came from FI
     recent_iqa: list[float] = field(default_factory=list)  # prior per-frame IQA scores (regression)
 
