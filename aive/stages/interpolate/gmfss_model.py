@@ -28,6 +28,8 @@ from pathlib import Path
 
 import numpy as np
 
+from .stage import check_frame_dims  # lazy-safe: stage.py never imports this module at top level
+
 log = logging.getLogger(__name__)
 
 
@@ -79,6 +81,7 @@ class GMFSSRunner:
 
     def _pad(self, frame_hwc_u8: np.ndarray) -> "np.ndarray":
         """HWC uint8 [h,w] -> NCHW float32 [0,1] padded to (ph,pw), zero border."""
+        check_frame_dims(frame_hwc_u8, self.width, self.height, type(self).__name__)
         f = frame_hwc_u8.astype(np.float32) / 255.0
         nchw = np.ascontiguousarray(f.transpose(2, 0, 1)[None])
         if self.pw != self.width or self.ph != self.height:

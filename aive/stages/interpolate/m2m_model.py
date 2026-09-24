@@ -29,6 +29,8 @@ from pathlib import Path
 
 import numpy as np
 
+from .stage import check_frame_dims  # lazy-safe: stage.py never imports this module at top level
+
 log = logging.getLogger(__name__)
 
 
@@ -75,6 +77,7 @@ class M2MRunner:
 
     def _to_gpu(self, frame_hwc_u8: np.ndarray):
         """HWC uint8 [h,w] -> NCHW in model dtype on GPU (no padding)."""
+        check_frame_dims(frame_hwc_u8, self.width, self.height, type(self).__name__)
         torch = self.torch
         dev = next(self.model.parameters()).device
         dtype = next(self.model.parameters()).dtype

@@ -142,6 +142,7 @@ class RIFERunner:
 
     def _pad(self, frame_hwc_u8: np.ndarray) -> "np.ndarray | object":
         """HWC uint8 [h,w] -> NCHW float32 [0,1] padded to (ph,pw), zero border."""
+        check_frame_dims(frame_hwc_u8, self.width, self.height, type(self).__name__)
         f = frame_hwc_u8.astype(np.float32) / 255.0
         nchw = np.ascontiguousarray(f.transpose(2, 0, 1)[None])
         if self.pw != self.width or self.ph != self.height:
@@ -205,6 +206,27 @@ def build_fi_runner(model_name: str, weights_path, width: int, height: int):
         f"Model '{model_name}' has no frame-interpolation adapter yet. "
         f"Available: {known}."
     )
+
+
+def check_frame_dims(frame_hwc_u8: np.ndarray, width: int, height: int, runner_name: str) -> None:
+    """Guard for fixed-resolution FI runners (see :meth:`InterpolateStage._ensure_runner`).
+
+    Every FI runner is built for one exact resolution and pads/crops around it. A
+    frame of any other size would otherwise surface deep inside the backend as a
+    cryptic numpy broadcast / TRT shape error; raise an actionable message instead.
+    In a correct pipeline this can only happen if a stage upstream emitted
+    inconsistent resolutions — the sr_first bug class fixed in 85166b7 (runner built
+    at source dims, fed upscaled frames).
+    """
+    fh, fw = frame_hwc_u8.shape[:2]
+    if (fw, fh) != (width, height):
+        raise RuntimeError(
+            f"{runner_name}: input frame {fw}x{fh} does not match the resolution this "
+            f"runner was built for ({width}x{height}). Fixed-resolution FI runners must "
+            "only receive frames at their build resolution — InterpolateStage rebuilds "
+            "the runner when input dims change, so this indicates an upstream stage "
+            "emitting inconsistent resolutions."
+        )
 
 
 class InterpolateStage:
