@@ -34,7 +34,6 @@ import dataclasses
 import logging
 import os
 import queue
-import subprocess
 import sys
 import threading
 import time
@@ -252,9 +251,11 @@ def _make_sample(cmd: dict, evt_q) -> None:
     if not dest:
         _emit(evt_q, {"type": "sample_error", "error": "no destination path given"})
         return
+    from ..stages.ingest import run_hidden
+
     script = Path(__file__).resolve().parent.parent.parent / "tools" / "make_sample_clip.py"
     try:
-        proc = subprocess.run(
+        proc = run_hidden(
             [sys.executable, str(script), dest], capture_output=True, text=True, timeout=900
         )
         if proc.returncode != 0 or not os.path.exists(dest):

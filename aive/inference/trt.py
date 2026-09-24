@@ -81,13 +81,14 @@ def _free_vram_nvidia_smi() -> int | None:
     tiny commits. nvidia-smi sees the true physical usage.
     """
     import shutil
-    import subprocess
+
+    from ..stages.ingest import run_hidden
 
     exe = shutil.which("nvidia-smi")
     if exe is None:
         return None
     try:
-        out = subprocess.run(
+        out = run_hidden(
             [exe, "--query-gpu=memory.free", "--format=csv,noheader,nounits"],
             capture_output=True, text=True, timeout=10,
         )

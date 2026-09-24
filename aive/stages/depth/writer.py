@@ -19,7 +19,7 @@ from pathlib import Path
 
 import numpy as np
 
-from ..ingest import find_ffmpeg
+from ..ingest import find_ffmpeg, popen_hidden
 
 log = logging.getLogger(__name__)
 
@@ -51,7 +51,7 @@ class DepthWriter:
             cmd += ["-f", "rawvideo", "-pix_fmt", "gray16le", "-s", f"{width}x{height}", "-r", fps, "-i", "pipe:0"]
             cmd += ["-c:v", "png", str(self.out_path / "%05d.png")]
 
-        self._proc = subprocess.Popen(cmd, stdin=subprocess.PIPE, stderr=subprocess.PIPE)
+        self._proc = popen_hidden(cmd, stdin=subprocess.PIPE, stderr=subprocess.PIPE)
         log.info("Depth writer started (%s): %s", fmt, self.out_path)
 
     def write(self, depth_f32: np.ndarray) -> None:

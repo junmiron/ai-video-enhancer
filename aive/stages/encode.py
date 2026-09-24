@@ -7,7 +7,7 @@ from pathlib import Path
 
 import numpy as np
 
-from .ingest import find_ffmpeg, probe
+from .ingest import find_ffmpeg, popen_hidden, probe, run_hidden
 
 log = logging.getLogger(__name__)
 
@@ -88,7 +88,7 @@ def encode_video(
         pass
     cmd += [str(out_path)]
 
-    proc = subprocess.Popen(cmd, stdin=subprocess.PIPE, stderr=subprocess.PIPE)
+    proc = popen_hidden(cmd, stdin=subprocess.PIPE, stderr=subprocess.PIPE)
     try:
         for frame in frames:
             if not isinstance(frame, np.ndarray):
@@ -127,7 +127,7 @@ def concat_encode(
 
     cmd += ["-map", "0:v:0"] + audio_map + video_args(preset, crf) + [str(out_path)]
 
-    proc = subprocess.run(cmd, capture_output=True, text=True)
+    proc = run_hidden(cmd, capture_output=True, text=True)
     if proc.returncode != 0:
         raise RuntimeError(f"ffmpeg concat encode failed (rc={proc.returncode}): {proc.stderr[:3000]}")
     return Path(out_path)
@@ -149,7 +149,7 @@ def encode_lossless(
         "-f", "rawvideo", "-pix_fmt", pix_fmt_in, "-s", f"{width}x{height}", "-r", fps, "-i", "pipe:0",
         "-c:v", "ffv1", "-level", "3", str(out_path),
     ]
-    proc = subprocess.Popen(cmd, stdin=subprocess.PIPE, stderr=subprocess.PIPE)
+    proc = popen_hidden(cmd, stdin=subprocess.PIPE, stderr=subprocess.PIPE)
     try:
         for frame in frames:
             if not isinstance(frame, np.ndarray):
@@ -168,7 +168,7 @@ def encode_lossless(
 def stream_copy_passthrough(src: str | Path, out_path: str | Path) -> Path:
     """Fast sanity passthrough: remux without re-encoding (-c copy)."""
     cmd = [find_ffmpeg(), "-v", "error", "-y", "-i", str(src), "-c", "copy", str(out_path)]
-    proc = subprocess.run(cmd, capture_output=True, text=True)
+    proc = run_hidden(cmd, capture_output=True, text=True)
     if proc.returncode != 0:
         raise RuntimeError(f"ffmpeg passthrough failed (rc={proc.returncode}): {proc.stderr[:3000]}")
     return Path(out_path)

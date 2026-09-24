@@ -62,6 +62,31 @@ def find_ffprobe() -> str:
     return exe
 
 
+def _merge_hidden(kwargs: dict) -> None:
+    """Merge window-suppression creationflags into Popen/run kwargs (Windows only).
+
+    The app is a GUI-subsystem build (console=False); on Windows every child
+    console program (ffmpeg/ffprobe/nvidia-smi/python) would otherwise allocate
+    its own visible console — dozens of windows per job. CREATE_NO_WINDOW keeps
+    pipes working while suppressing the window. ``creationflags`` is rejected on
+    POSIX, so this is a no-op elsewhere. Existing flags are OR-ed, never clobbered.
+    """
+    if sys.platform == "win32":
+        kwargs["creationflags"] = int(kwargs.get("creationflags", 0)) | subprocess.CREATE_NO_WINDOW
+
+
+def run_hidden(cmd: list[str], **kwargs) -> subprocess.CompletedProcess:
+    """subprocess.run that never pops a console window (see :func:`_merge_hidden`)."""
+    _merge_hidden(kwargs)
+    return subprocess.run(cmd, **kwargs)
+
+
+def popen_hidden(cmd: list[str], **kwargs) -> subprocess.Popen:
+    """subprocess.Popen that never pops a console window (see :func:`_merge_hidden`)."""
+    _merge_hidden(kwargs)
+    return subprocess.Popen(cmd, **kwargs)
+
+
 @dataclass
 class MediaInfo:
     path: str
@@ -83,7 +108,7 @@ class MediaInfo:
 def probe(path: str | Path) -> MediaInfo:
     path = str(path)
     cmd = [find_ffprobe(), "-v", "error", "-print_format", "json", "-show_streams", "-show_format", path]
-    out = subprocess.run(cmd, capture_output=True, text=True, check=True).stdout
+    out = run_hidden(cmd, capture_output=True, text=True, check=True).stdout
     data = json.loads(out)
 
     vstream = next((s for s in data.get("streams", []) if s.get("codec_type") == "video"), None)
@@ -163,7 +188,7 @@ def decode_frames(
         cmd += ["-fps_mode", "passthrough"]
     cmd += ["-f", "rawvideo", "-pix_fmt", pix_fmt, "-"]
 
-    proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    proc = popen_hidden(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
     frame_size = w * h * channels
     try:
         while True:
@@ -213,7 +238,7 @@ def grab_frame(path: str | Path, index: int):
         "-frames:v", str(limit),
         "-f", "rawvideo", "-pix_fmt", "rgb24", "-",
     ]
-    proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    proc = popen_hidden(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
     frame_size = info.width * info.height * 3
     frames_q: queue.Queue[bytes | None] = queue.Queue(maxsize=16)
 
