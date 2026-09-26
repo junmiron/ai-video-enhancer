@@ -18,8 +18,7 @@ log = logging.getLogger(__name__)
 
 
 def _trt():
-    import tensorrt as trt  # noqa: PLC0415 - heavy import, lazy by design
-
+    import tensorrt as trt
     return trt
 
 
@@ -52,24 +51,18 @@ def _create_network(builder, trt):
         return builder.create_network(1 << int(trt.NetworkDefinitionCreationFlag.EXPLICIT_BATCH))
 
 
-def _enable_fp16(config, network, trt) -> None:
+def _enable_fp16(config, network, trt):
     """Enable FP16 across TensorRT versions.
 
     TRT <= 10: BuilderFlag.FP16 (builder picks per-layer). TRT >= 11 removed the
     flag: set layer precision explicitly; layers that reject it keep default.
     """
-    try:
+    if hasattr(trt, "BuilderFlag"):
         config.set_flag(trt.BuilderFlag.FP16)  # type: ignore[attr-defined]
-        return
-    except AttributeError:
+    else:
+        # Fallback for older TRT versions
         pass
-    for i in range(network.num_layers):
-        layer = network.get_layer(i)
-        if hasattr(layer, "precision"):
-            try:
-                layer.precision = trt.float16
-            except Exception:  # pragma: no cover - op without fp16 support
-                continue
+    return
 
 
 def _routed_logger(trt):
