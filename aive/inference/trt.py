@@ -72,6 +72,34 @@ def _enable_fp16(config, network, trt) -> None:
                 continue
 
 
+def _routed_logger(trt):
+    """TensorRT ILogger that routes messages into Python logging.
+
+    TRT's default C++ logger writes to stdout/stderr, which goes nowhere in the
+    frozen GUI build (no console) — so engine-build failures surfaced as an
+    opaque 'returned no data' with zero diagnostics. Routing through our log
+    means the UI log panel shows TensorRT's actual reason (e.g. a memory
+    allocation failure). Handles both TRT >=10 ``on_message(severity, msg)`` and
+    legacy ``on_message(severity, location, msg)`` signatures; severity is
+    matched by name so it works across TRT versions.
+    """
+
+    class _Routed(trt.ILogger):
+        def on_message(self, severity, *args):  # noqa: A003 - TRT's own parameter name
+            msg = str(args[-1]) if args else ""
+            name = getattr(severity, "name", None) or str(severity).upper()
+            if name in ("INTERNAL_ERROR", "ERROR"):
+                log.error("TensorRT: %s", msg)
+            elif name == "WARNING":
+                log.warning("TensorRT: %s", msg)
+            elif name == "INFO":
+                log.info("TensorRT: %s", msg)
+            else:  # VERBOSE and anything unknown
+                log.debug("TensorRT: %s", msg)
+
+    return _Routed()
+
+
 def _free_vram_nvidia_smi() -> int | None:
     """Free VRAM per nvidia-smi (MiB->bytes), or None when unavailable.
 
@@ -142,12 +170,12 @@ def build_engine(
     streaming engines whose view count varies per chunk (full window vs tail).
     """
     trt = _trt()
-    logger = trt.Logger(trt.Logger.WARNING)
+    logger = _routed_logger(trt)
     builder = trt.Builder(logger)
     data = Path(onnx_path).read_bytes()
 
+    free = free_vram_bytes()
     if workspace_bytes is None:
-        free = free_vram_bytes()
         workspace_bytes = int(min(4 << 30, max(512 << 20, (free // 2) if free else 4 << 30)))
 
     def _build_once(prec: str) -> tuple[bytes, float]:
@@ -173,7 +201,10 @@ def build_engine(
 
     attempts = [precision] + (["default"] if precision == "fp16" else [])
     last_err: Exception | None = None
+    free_s = f"{free / 2**30:.1f} GiB" if free else "unknown"
     for prec in attempts:
+        log.info("TRT build attempt %s: workspace %.1f GiB (free VRAM %s)",
+                 prec.upper(), workspace_bytes / 2**30, free_s)
         try:
             blob, dt = _build_once(prec)
             break
@@ -201,7 +232,7 @@ class TrtRunner:
 
         self.torch = torch
         trt = _trt()
-        logger = trt.Logger(trt.Logger.WARNING)
+        logger = _routed_logger(trt)
         self._runtime = trt.Runtime(logger)
         with open(engine_path, "rb") as f:
             self.engine = self._runtime.deserialize_cuda_engine(f.read())

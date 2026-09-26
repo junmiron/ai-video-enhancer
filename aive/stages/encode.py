@@ -97,6 +97,14 @@ def encode_video(
         proc.stdin.close()
     except BrokenPipeError:
         pass
+    finally:
+        # If the frame stream raised (stage failure mid-segment), don't leave an
+        # orphaned ffmpeg encoder running; close stdin so it can finalize and exit.
+        try:
+            if proc.stdin is not None and not proc.stdin.closed:
+                proc.stdin.close()
+        except (BrokenPipeError, OSError):  # pragma: no cover - pipe already gone
+            pass
     err = proc.stderr.read().decode("utf-8", "replace") if proc.stderr else ""
     rc = proc.wait()
     if rc != 0:
@@ -158,6 +166,14 @@ def encode_lossless(
         proc.stdin.close()
     except BrokenPipeError:
         pass
+    finally:
+        # If the frame stream raised (stage failure mid-segment), don't leave an
+        # orphaned ffmpeg encoder running; close stdin so it can finalize and exit.
+        try:
+            if proc.stdin is not None and not proc.stdin.closed:
+                proc.stdin.close()
+        except (BrokenPipeError, OSError):  # pragma: no cover - pipe already gone
+            pass
     err = proc.stderr.read().decode("utf-8", "replace") if proc.stderr else ""
     rc = proc.wait()
     if rc != 0:

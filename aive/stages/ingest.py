@@ -157,6 +157,36 @@ def _read_exact(stream, n: int) -> bytes | None:
     return b"".join(chunks)
 
 
+def _decode_cleanup(proc, stream_completed: bool) -> int:
+    """Finalize an ffmpeg decode pipe; returns the process exit code.
+
+    Distinguishes two very different rc!=0 outcomes:
+      * consumer stopped early (pipeline failure/cancel upstream) — closing our
+        stdout pipe caused ffmpeg's EPIPE ("Broken pipe"); that is expected
+        cleanup, logged at debug only;
+      * ffmpeg ended the stream itself with an error — a real decode failure:
+        ERROR log, and RuntimeError when we are not mid-generator-close (a
+        truncated stream must never be silently accepted downstream).
+    """
+    proc.stdout.close()
+    err = proc.stderr.read().decode("utf-8", "replace") if proc.stderr else ""
+    try:
+        rc = proc.wait(timeout=15)
+    except subprocess.TimeoutExpired:  # pragma: no cover - ffmpeg stuck despite EPIPE
+        proc.kill()
+        rc = proc.wait()
+    if rc != 0 and err.strip():
+        closing_down = sys.exc_info()[0] is GeneratorExit
+        if stream_completed:
+            log.error("ffmpeg decode failed (rc=%s): %s", rc, err[:2000])
+            if not closing_down:
+                raise RuntimeError(f"ffmpeg decode failed (rc={rc}): {err[:1500]}") from None
+        else:
+            # Consumer stopped early — the EPIPE above is expected cleanup noise.
+            log.debug("ffmpeg decode aborted by consumer (rc=%s)", rc)
+    return rc
+
+
 def decode_frames(
     path: str | Path,
     start_frame: int = 0,
@@ -190,18 +220,16 @@ def decode_frames(
 
     proc = popen_hidden(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
     frame_size = w * h * channels
+    stream_completed = False
     try:
         while True:
             buf = _read_exact(proc.stdout, frame_size)
             if buf is None:
                 break
             yield np.frombuffer(buf, dtype=np.uint8).reshape(h, w, channels)
+        stream_completed = True
     finally:
-        proc.stdout.close()
-        err = proc.stderr.read().decode("utf-8", "replace") if proc.stderr else ""
-        rc = proc.wait()
-        if rc != 0 and err.strip():
-            log.error("ffmpeg decode failed (rc=%s): %s", rc, err[:2000])
+        _decode_cleanup(proc, stream_completed)
 
 
 def grab_frame(path: str | Path, index: int):

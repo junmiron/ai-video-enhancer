@@ -63,7 +63,7 @@ class FILMRunner:
     # -- backend setup -------------------------------------------------------
 
     def _build_trt(self, weights_path: str | Path) -> None:
-        from ...inference.trt import TrtRunner, build_engine, engine_cache_dir
+        from ...inference.trt import TrtRunner, build_engine, engine_cache_dir, free_vram_bytes
 
         weights_path = Path(weights_path)
         sha = hashlib.sha256(weights_path.read_bytes()).hexdigest()[:16]
@@ -82,11 +82,13 @@ class FILMRunner:
             try:
                 build_engine(weights_path, engine_path, precision=self.precision, profiles=profiles)
             except Exception as exc:  # no torch fallback for FILM -> surface clearly
+                free = free_vram_bytes()
+                free_s = f"{free / 2**30:.1f} GiB" if free else "unknown"
                 raise RuntimeError(
-                    "Failed to build the FILM TensorRT engine. This is usually a VRAM "
-                    f"shortage (a {self.ph}x{self.pw} fp16 engine needs several GB free). "
-                    "Close other GPU apps (e.g. an LLM server) and retry, or process at a "
-                    f"lower resolution. Underlying error: {str(exc)[:300]}"
+                    f"Failed to build the FILM TensorRT engine at {self.ph}x{self.pw}. Free VRAM at build time: {free_s}. "
+                    "This is usually a VRAM shortage (a full-res fp16 engine needs several GB free). Close other GPU apps "
+                    "(e.g. an LLM server) and retry, or process at a lower resolution / interpolate before upscaling. "
+                    f"Underlying error: {str(exc)[:300]}"
                 ) from exc
         self._runner = TrtRunner(engine_path)
         # Robust to the output node name; FILM has exactly one image output.
