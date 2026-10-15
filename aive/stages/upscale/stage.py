@@ -9,8 +9,11 @@ memory for one frame exceeds 75% of free VRAM, the runner switches to tiled
 inference with overlap + feathered blending (see :mod:`tiling`) so no seam
 survives at any resolution.
 
-A user-requested output scale different from the model's native scale is
-applied as a LANCZOS resize after inference (e.g. x4 target on an x2 model).
+When the requested output scale is an exact integer power of the model's
+native scale (e.g. x4 or x8 on an x2 model), the stage cascades that many AI
+passes so every step gets real super-resolution detail (true Nx). Any other
+target falls back to a single pass at the native scale followed by a LANCZOS
+resize.
 """
 from __future__ import annotations
 
@@ -256,6 +259,24 @@ class SRRunner:
         return np.nan_to_num(out).transpose(1, 2, 0)
 
 
+def _cascade_passes(native_scale: int, target_scale: int) -> int | None:
+    """Number of chained passes so that ``native_scale ** n == target_scale``.
+
+    Returns an integer >= 1 when the target is an exact power of the native
+    scale (so a cascade reaches it with no resampling), else ``None`` (the caller
+    falls back to one pass + LANCZOS). A target equal to the native scale yields
+    1 (a single pass, no resize).
+    """
+    if native_scale <= 1 or target_scale < native_scale:
+        return None
+    n = 0
+    t = target_scale
+    while t % native_scale == 0:
+        t //= native_scale
+        n += 1
+    return n if t == 1 else None
+
+
 class UpscaleStage:
     """Pipeline stage: frames at source resolution -> AI-upscaled frames."""
 
@@ -263,8 +284,20 @@ class UpscaleStage:
 
     def __init__(self, cfg: UpscaleConfig):
         self.cfg = cfg
-        self._runner: SRRunner | None = None
+        # One runner per input resolution. Cascading (target a multiple of the
+        # model's native scale) needs a chain of runners at increasing sizes;
+        # they're built once and reused across all segments/frames of a job.
+        self._runners: dict[tuple[int, int], SRRunner] = {}
         self.frames_processed = 0
+
+    def _get_runner(self, weights: str | Path, width: int, height: int) -> SRRunner:
+        """Build (or fetch from cache) a runner sized for one pass's input dims."""
+        key = (width, height)
+        runner = self._runners.get(key)
+        if runner is None:
+            runner = SRRunner(weights, width, height, model_name=self.cfg.model)
+            self._runners[key] = runner
+        return runner
 
     # -- stage interface ------------------------------------------------------
 
@@ -282,24 +315,53 @@ class UpscaleStage:
         from ...models.downloader import download_model
         from ...models.registry import get_model
 
-        if self._runner is None:
-            info = get_model(self.cfg.model, task="sr")
-            weights = download_model(info)
-            log.info("Upscaling: %s @ %dx%d (target x%s)",
-                     self.cfg.model, ctx.width, ctx.height,
-                     self.cfg.scale or spec_for(self.cfg.model).scale)
-            self._runner = SRRunner(weights, ctx.width, ctx.height, model_name=self.cfg.model)
-
-        runner = self._runner
-        native_scale = runner.scale
+        native_scale = spec_for(self.cfg.model).scale
         target_scale = self.cfg.scale or native_scale
+
+        # Cascade (Option A): when the requested scale is an exact integer power
+        # of the model's native scale, chain that many AI passes so every step
+        # gets real SR detail (true Nx) instead of one pass + Lanczos resample.
+        # Any other target keeps a single native-scale pass followed by LANCZOS.
+        passes = _cascade_passes(native_scale, target_scale)  # int >=1 or None
+
         out_w, out_h = ctx.width * target_scale, ctx.height * target_scale
 
+        if not self._runners:
+            info = get_model(self.cfg.model, task="sr")
+            weights = download_model(info)
+            n = passes or 1
+            if passes is not None and passes > 1:
+                log.info(
+                    "Upscaling: %s @ %dx%d (target x%s) - cascading x%s over %d passes for true x%s",
+                    self.cfg.model, ctx.width, ctx.height, target_scale,
+                    native_scale, passes, target_scale,
+                )
+            elif passes is None:
+                log.info("Upscaling: %s @ %dx%d (target x%s) -> LANCZOS to target",
+                         self.cfg.model, ctx.width, ctx.height, target_scale)
+            else:
+                log.info("Upscaling: %s @ %dx%d (target x%s)",
+                         self.cfg.model, ctx.width, ctx.height, target_scale)
+            # Pre-build the whole chain so the first frame isn't slow and each
+            # later pass's VRAM estimate already accounts for earlier engines.
+            cw, ch = ctx.width, ctx.height
+            for _ in range(n):
+                self._get_runner(weights, cw, ch)
+                cw *= native_scale
+                ch *= native_scale
+
         ctl = getattr(ctx, "control", None)
+        # Chain of runners: pass i runs at source * native^i.
+        n = passes or 1
+        chain = [self._runners[(ctx.width * (native_scale ** i), ctx.height * (native_scale ** i))]
+                 for i in range(n)]
         for frame in frames:
             check_control(ctl)  # M6: pause/cancel takes effect within one frame
-            up = runner(frame)  # HWC uint8 at native scale
-            if target_scale != native_scale:
+            up = frame
+            for runner in chain:
+                up = runner(up)  # each pass upscales by the model's native scale
+            if passes is None:
+                # Not an exact power of the native scale -> resample to target.
                 import cv2
 
                 up = cv2.resize(up, (out_w, out_h), interpolation=cv2.INTER_LANCZOS4)

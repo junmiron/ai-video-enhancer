@@ -59,7 +59,7 @@ the settings panel, and your tweaks survive switching presets for unrelated grou
 ### Upscale
 - **Enable upscaling** — off = pass-through at source resolution.
 - **Model** — see [Models](#models-and-licenses). Hover any entry for its license and notes; `✓` means the weights are already cached.
-- **Scale** — target output scale. If it differs from the model's native scale, a high-quality LANCZOS resize is applied after inference (e.g. the Live Action preset runs the x4 Real-ESRGAN model at a 2× target).
+- **Scale** — target output scale. When it is an exact power of the model's native scale (e.g. ×4 or ×8 on an x2 model), the app chains that many AI passes so every step gets real super-resolution detail (true Nx) rather than one pass + resample. Any other target runs a single pass at the native scale, then a high-quality LANCZOS resize to the requested size (e.g. the Live Action preset runs the x4 Real-ESRGAN model at a 2× target).
 
 ### Frame interpolation
 - **Mode: Target FPS** — pick a target frame rate (24/30/50/60/120); the app computes the needed multiplier per scene.
