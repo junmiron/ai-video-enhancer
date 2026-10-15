@@ -202,6 +202,24 @@ def test_build_fi_runner_routes_m2m(monkeypatch):
     assert calls["args"] == ("/some/file.pth", 1920, 1080)
 
 
+def test_build_fi_runner_routes_amt(monkeypatch):
+    """'amt_s'/'amt_l' route to AMTRunner with the correct variant tag."""
+    from aive.stages.interpolate import amt_model
+
+    calls = {}
+
+    class _Stub:
+        def __init__(self, weights_path, width, height, variant="s"):
+            calls["args"] = (weights_path, width, height)
+            calls["variant"] = variant
+
+    monkeypatch.setattr(amt_model, "AMTRunner", _Stub)
+    for name, var in (("amt_s", "s"), ("amt_l", "l")):
+        runner = build_fi_runner(name, "/some/file.pth", 1920, 1080)
+        assert isinstance(runner, _Stub) and calls["variant"] == var
+    assert calls["args"] == ("/some/file.pth", 1920, 1080)
+
+
 def test_build_fi_runner_routes_rife_variants(monkeypatch):
     """Every RIFE variant routes to RIFERunner with the right variant tag."""
     from aive.stages.interpolate import stage as st
@@ -434,6 +452,80 @@ def test_m2m_uhd_fp32_path():
     frames = _moving_frames(3, w=1936, h=1088)
     out = runner(frames[0], frames[2], 0.5)
     assert out.shape == (1088, 1936, 3) and out.dtype == np.uint8
+
+    del runner
+    torch.cuda.empty_cache()
+
+
+# -- GPU tests (real AMT weights) -------------------------------------------
+
+
+def _amt_weights(variant: str = "s"):
+    from aive.models.downloader import download_model
+    from aive.models.registry import get_model
+
+    return download_model(get_model(f"amt_{variant}"))  # single .pth file
+
+
+@pytest.mark.gpu
+def test_amt_s_torch_sanity():
+    """AMT-S (CUDA torch) end-to-end: real motion synthesis, full dynamic range.
+
+    AMT has no per-pair reuse (flow is computed inside forward), so this checks a
+    single interpolation at t=0.5 plus padding to a multiple of 16. Dims stay
+    >=128/px because AMT's 4-level correlation pyramid destabilizes below that
+    (verified on CPU); real video frames are far larger.
+    """
+    import torch
+
+    from aive.stages.interpolate.amt_model import AMTRunner
+
+    weights = _amt_weights("s")
+    runner = AMTRunner(weights, width=160, height=128)  # already /16 -> no padding
+    assert (runner.pw, runner.ph) == (160, 128) and not runner.uhd
+
+    frames = _moving_frames(3, w=160, h=128)
+    out = runner(frames[0], frames[2], 0.5)
+    assert out.shape == (128, 160, 3) and out.dtype == np.uint8
+    # Real motion synthesis: differs from both endpoints with full dynamic range.
+    assert not np.array_equal(out, frames[0]) and not np.array_equal(out, frames[2])
+    assert out.max() > 200 and len(np.unique(out)) > 4
+
+    del runner
+    torch.cuda.empty_cache()
+
+
+@pytest.mark.gpu
+def test_amt_padding_nonmultiple():
+    """A non-multiple-of-16 width pads up (150 -> 160); output crops back to exact dims."""
+    import torch
+
+    from aive.stages.interpolate.amt_model import AMTRunner
+
+    weights = _amt_weights("s")
+    runner = AMTRunner(weights, width=150, height=128)
+    assert (runner.pw, runner.ph) == (160, 128)
+
+    frames = _moving_frames(3, w=150, h=128)
+    out = runner(frames[0], frames[2], 0.5)
+    assert out.shape == (128, 150, 3) and out.dtype == np.uint8
+
+    del runner
+    torch.cuda.empty_cache()
+
+
+@pytest.mark.gpu
+def test_amt_l_torch_sanity():
+    """AMT-L builds + runs end-to-end at a modest shape (larger arch)."""
+    import torch
+
+    from aive.stages.interpolate.amt_model import AMTRunner
+
+    weights = _amt_weights("l")
+    runner = AMTRunner(weights, width=160, height=128)
+    frames = _moving_frames(3, w=160, h=128)
+    out = runner(frames[0], frames[2], 0.5)
+    assert out.shape == (128, 160, 3) and out.dtype == np.uint8
 
     del runner
     torch.cuda.empty_cache()

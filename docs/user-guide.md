@@ -164,7 +164,7 @@ the UI tooltips. Full audit with verification dates: [docs/licenses.md](licenses
 | RIFE 4.25 (Lite / Balanced / Heavy) | MIT | TRT + CUDA | Default for all content. Fast (~24 ms/call @720p on a 5090). Any multiplier. |
 | GMFSS | code MIT; **weights unlicensed ⚠️** | CUDA only | Experimental, anime-oriented quality; ~4× slower than RIFE per call. |
 | M2M | **Adobe Research License (non-commercial) ⚠️** | CUDA only | Experimental; slowest per call but its per-pair flow reuse makes it efficient at high multipliers (4×–8×). |
-| AMT-SICDIA | TBD ⚠️ | — | Registered but **no adapter yet** — selecting it will fail with a clear error until implemented. |
+| AMT-S / AMT-L (CVPR'23) | code CC BY-NC 4.0; weights CC BY-NC-SA 4.0 ⚠️ | CUDA only | Experimental anime/large-motion interpolator (all-pairs multi-field transforms). S = fast default, L = higher quality/slower. No TensorRT path (correlation volume + warp aren't exportable); fp16 below UHD / fp32 above. |
 
 **Artifact repair (used internally by the QA stage)**: SCUNet (Apache-2.0 arch,
 personal-use weights) and deepDeband-f (BSD-3 + MIT archs, personal-use weights);

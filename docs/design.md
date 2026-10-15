@@ -150,7 +150,7 @@ Research done against upstream repos on 2026-09-17 (links in §9). Models are **
 |---|---|---|---|---|
 | **RIFE 4.25 / 4.25-heavy** — default | Everything | Upstream's recommended default; TAS ships the full 4.x line incl. heavy variant (great on 32 GB) | CUDA + TRT ✅ | MIT ✅ |
 | **RIFE 4.25-lite** | Fast mode / ghost-repair fallback | Lower-cost variant for speed preset & targeted re-interpolation | CUDA + TRT ✅ | MIT ✅ |
-| **AMT-SICDIA** | Anime, 2D animation (experimental) | Strong on anime motion; alternate model for ghost repair | CUDA | verify at build ⚠️ |
+| **AMT-S / AMT-L** ✅ implemented | Anime, 2D animation (experimental) | All-pairs multi-field transforms (CVPR'23); strong on anime/large-motion; alternate model for ghost repair | CUDA only (no TRT) | CC BY-NC(-SA) ⚠️ personal use |
 | **M2M** (CVPR'22) | High multipliers (4×–8×), general | Many-to-many splatting: motion estimated once per frame pair → very efficient when generating many intermediate frames; ideal for 120 fps+ targets | CUDA (TRT if exportable) | "Other" license ⚠️ personal use |
 | **GMFSS** | Anime, experimental | GMFlow-based anime interpolation (SVFI-team lineage); community successors (Fortuna/union) improve it further — we track the best maintained variant at build time | CUDA | no license file ⚠️ personal use only |
 
@@ -306,7 +306,7 @@ Per-stage progress (Interpolate ▓▓░ · Upscale ▓▓▓░ 62% · QA ░�
 | Real-ESRGAN code / weights | BSD-3 / **weights non-commercial** ⚠️ | OK per D3; document in app's license screen |
 | SwinIR/HAT (if added later) | some weights CC-BY-NC ⚠️ | same treatment |
 | ShuffleCugan, Fallin, SPAN, Cyte, OpenProteus, AniScale 2, RTMOSR/Saryn/Gauss, deepDeband-f, SCUNet, FastLineDarken, Anime1080fixer, DeJpeg/DeH264 | mixed — **per-model license check at integration** (most are MIT/Apache; SPAN & some research models need verification) ⚠️ | ship only after check passes; NC/research ones marked in UI model list |
-| SAFA, AMT-SICDIA | research repos — verify at integration ⚠️ | "experimental" flag until cleared |
+| SAFA (pending); AMT-S/L ✅ integrated | research repos — AMT verified at integration: code CC BY-NC 4.0, weights CC BY-NC-SA 4.0 ⚠️ | AMT shipped with "experimental" flag; SAFA still pending |
 | M2M (CVPR'22) | **"Other" / non-standard license** ⚠️ | personal use per D3; no redistribution claims; marked in UI model list |
 | GMFSS | **no license file** ⚠️ | personal use per D3 only; we track the best-maintained community variant (Fortuna/union) at build time and re-check its terms then |
 | ~~FILM~~ (google-research — removed 2026-10-15) | Apache-2.0 ✅ | no longer bundled; model removed from product, so its license is no longer relevant to shipping |

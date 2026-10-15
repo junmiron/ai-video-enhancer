@@ -155,17 +155,30 @@
       "notes": "GMFSS (routineLife1/GMFSS, archived) union-variant weights as mirrored by TAS; arch vendored from GMFSS_Fortuna (98mxr, MIT). The zip bundle extracts to a directory of 5 checkpoints (union names renamed to canonical). Runner: PyTorch-CUDA only — the softsplat splatting is an index_add_ scatter with data-dependent boundary masks that ONNX cannot represent, so there is no TensorRT path; fp16 below UHD / fp32 at/above it, flow computed at half res above 1080p (TAS rule), per-pair reuse cache. Weights carry no upstream license: personal use only per project decision D3."
     },
     {
-      "name": "amt_sicdia",
+      "name": "amt_s",
       "task": "fi",
-      "version": "v1 (ECCV'24)",
-      "urls": [],
-      "sha256": null,
+      "version": "v1 (CVPR'23)",
+      "urls": ["https://huggingface.co/lalala125/AMT/resolve/main/amt-s.pth"],
+      "sha256": "07e7e03405c213fe4405678db9b42d05671e48c56faf6a441b99bb0047d3cf77",
+      "min_vram_gb": 4,
+      "backends": {"cuda": true, "tensorrt": false},
+      "license": "code CC BY-NC 4.0 (MCG-NKU/AMT); weights CC BY-NC-SA 4.0 ⚠️",
+      "recommended_for": "experimental: strong anime / large-motion interpolation; fast AMT variant (start here)",
+      "experimental": true,
+      "notes": "AMT-S (MCG-NKU/AMT, CVPR'23) all-pairs multi-field transforms. Single-file HuggingFace checkpoint ({'epoch','state_dict'}); loaded weights_only=False. Arch vendored under _amt/networks/. Runner: PyTorch-CUDA only — the correlation volume + grid_sample warp are not export-verified; fp16 below UHD / fp32 at/above."
+    },
+    {
+      "name": "amt_l",
+      "task": "fi",
+      "version": "v1 (CVPR'23)",
+      "urls": ["https://huggingface.co/lalala125/AMT/resolve/main/amt-l.pth"],
+      "sha256": "985a3569f6e9e27d1a45a96ed02518cff9cf5cbee49c88193a84afbd8cf264f3",
       "min_vram_gb": 8,
       "backends": {"cuda": true, "tensorrt": false},
-      "license": "TBD ⚠️",
-      "recommended_for": "experimental: SOTA large-motion interpolation; also the planned ghost-repair alternate model (M4)",
+      "license": "code CC BY-NC 4.0 (MCG-NKU/AMT); weights CC BY-NC-SA 4.0 ⚠️",
+      "recommended_for": "experimental: higher-quality large-motion interpolation; larger/slower AMT variant",
       "experimental": true,
-      "notes": "AMT-SICDIA (Adaptive Motion Transformer). Public weights URL not located as of 2026-09-17; confirm at adapter time. Adapter not yet implemented."
+      "notes": "AMT-L (MCG-NKU/AMT, CVPR'23) all-pairs multi-field transforms. Single-file HuggingFace checkpoint ({'epoch','state_dict'}); loaded weights_only=False. Arch vendored under _amt/networks/. Runner: PyTorch-CUDA only — the correlation volume + grid_sample warp are not export-verified; fp16 below UHD / fp32 at/above."
     },
     {
       "name": "scunet",

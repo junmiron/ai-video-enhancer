@@ -195,7 +195,11 @@ def build_fi_runner(model_name: str, weights_path, width: int, height: int):
         from .m2m_model import M2MRunner
 
         return M2MRunner(weights_path, width, height)
-    known = ", ".join(sorted(RIFE_VARIANTS + ("gmfss", "m2m")))
+    if model_name in ("amt_s", "amt_l"):
+        from .amt_model import AMTRunner
+
+        return AMTRunner(weights_path, width, height, variant=model_name.removeprefix("amt_"))
+    known = ", ".join(sorted(RIFE_VARIANTS + ("gmfss", "m2m", "amt_s", "amt_l")))
     raise ValueError(
         f"Model '{model_name}' has no frame-interpolation adapter yet. "
         f"Available: {known}."
