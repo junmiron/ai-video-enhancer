@@ -149,11 +149,12 @@ Research done against upstream repos on 2026-09-17 (links in §9). Models are **
 | Model | Best for | Why included | Backend support | License |
 |---|---|---|---|---|
 | **RIFE 4.25 / 4.25-heavy** — default | Everything | Upstream's recommended default; TAS ships the full 4.x line incl. heavy variant (great on 32 GB) | CUDA + TRT ✅ | MIT ✅ |
-| **RIFE 4.22-lite** | Fast mode / ghost-repair fallback | Lower-cost variant for speed preset & targeted re-interpolation | CUDA + TRT ✅ | MIT ✅ |
+| **RIFE 4.25-lite** | Fast mode / ghost-repair fallback | Lower-cost variant for speed preset & targeted re-interpolation | CUDA + TRT ✅ | MIT ✅ |
 | **AMT-SICDIA** | Anime, 2D animation (experimental) | Strong on anime motion; alternate model for ghost repair | CUDA | verify at build ⚠️ |
 | **M2M** (CVPR'22) | High multipliers (4×–8×), general | Many-to-many splatting: motion estimated once per frame pair → very efficient when generating many intermediate frames; ideal for 120 fps+ targets | CUDA (TRT if exportable) | "Other" license ⚠️ personal use |
 | **GMFSS** | Anime, experimental | GMFlow-based anime interpolation (SVFI-team lineage); community successors (Fortuna/union) improve it further — we track the best maintained variant at build time | CUDA | no license file ⚠️ personal use only |
-| **FILM** (Google) | Experimental max-quality | CVPR'24 learned-motions FI; strong on benchmarks; clean Apache-2.0 code + checkpoints | CUDA (+TRT if exportable) | Apache-2.0 ✅ |
+
+> **FILM** (Google, Apache-2.0) was evaluated during M2.x but **removed from the product on 2026-10-15**: its TensorRT engine build fails at upscaled resolutions on the target GPU and it has no PyTorch fallback, so shipping it would be broken. Not in the shipped lineup; kept here for provenance only.
 
 ### 5.3 Restoration models (used by the QA stage & optional manual restore)
 
@@ -308,7 +309,7 @@ Per-stage progress (Interpolate ▓▓░ · Upscale ▓▓▓░ 62% · QA ░�
 | SAFA, AMT-SICDIA | research repos — verify at integration ⚠️ | "experimental" flag until cleared |
 | M2M (CVPR'22) | **"Other" / non-standard license** ⚠️ | personal use per D3; no redistribution claims; marked in UI model list |
 | GMFSS | **no license file** ⚠️ | personal use per D3 only; we track the best-maintained community variant (Fortuna/union) at build time and re-check its terms then |
-| FILM (google-research) | Apache-2.0 ✅ | bundle freely |
+| ~~FILM~~ (google-research — removed 2026-10-15) | Apache-2.0 ✅ | no longer bundled; model removed from product, so its license is no longer relevant to shipping |
 | Depth-Anything V2 / DA3 checkpoints | Apache-2.0 ✅ | bundle freely |
 | Limbo v1/v2 (anime fine-tune of DA3-small) | **verify at integration** ⚠️ | "experimental" flag until cleared; TAS's TRT streaming validation gives us a proven export path either way |
 | **Spandrel** (chaiNNer's model loader) for custom-model import | **GPL-3.0** ⚠️ | Two clean options: (a) implement the feature in a separate subprocess that talks to our MIT core over IPC (mere aggregation — keeps app MIT), or (b) license the whole app AGPL like TAS. Default plan: **(a)**; custom-model import is an advanced/optional feature, not v1-critical |
