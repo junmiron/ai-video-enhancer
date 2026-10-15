@@ -8,7 +8,7 @@ TensorRT).
 
 ```
 input video ──► scene detection ──► frame interpolation ──► upscale ──► artifact QA ──► encode ──► output
-                    (cuts never crossed)      (RIFE/GMFSS/M2M/FILM)   (CUGAN/ESRGAN/…)  (detect+repair)  (H.265 10-bit)
+                    (cuts never crossed)      (RIFE/GMFSS/M2M)        (CUGAN/ESRGAN/…)  (detect+repair)  (H.265 10-bit)
                                                                                                     │
                                                                                           optional depth-map pass
 ```
@@ -64,7 +64,7 @@ the settings panel, and your tweaks survive switching presets for unrelated grou
 ### Frame interpolation
 - **Mode: Target FPS** — pick a target frame rate (24/30/50/60/120); the app computes the needed multiplier per scene.
 - **Mode: Multiplier** — fixed ×2 / ×3 / ×4 on top of the source rate.
-- **Model** — RIFE 4.25 family (with a *Quality* selector: Lite / Balanced / Heavy), or the experimental GMFSS, M2M and FILM. Any multiplier works with all models (continuous timestep).
+- **Model** — RIFE 4.25 family (with a *Quality* selector: Lite / Balanced / Heavy), or the experimental GMFSS and M2M. Any multiplier works with all models (continuous timestep).
 - **De-duplicate held frames (threshold)** — anime often holds identical frames; values >0 skip interpolating pairs that differ by less than the threshold (Anime preset: 0.01).
 
 ### Artifact detection & repair
@@ -164,7 +164,6 @@ the UI tooltips. Full audit with verification dates: [docs/licenses.md](licenses
 | RIFE 4.25 (Lite / Balanced / Heavy) | MIT | TRT + CUDA | Default for all content. Fast (~24 ms/call @720p on a 5090). Any multiplier. |
 | GMFSS | code MIT; **weights unlicensed ⚠️** | CUDA only | Experimental, anime-oriented quality; ~4× slower than RIFE per call. |
 | M2M | **Adobe Research License (non-commercial) ⚠️** | CUDA only | Experimental; slowest per call but its per-pair flow reuse makes it efficient at high multipliers (4×–8×). |
-| FILM | Apache-2.0 | TensorRT only | Experimental, benchmark-grade quality for large motion; any multiplier. The only FI model that runs via TRT (TF2 origin). |
 | AMT-SICDIA | TBD ⚠️ | — | Registered but **no adapter yet** — selecting it will fail with a clear error until implemented. |
 
 **Artifact repair (used internally by the QA stage)**: SCUNet (Apache-2.0 arch,

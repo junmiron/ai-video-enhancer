@@ -9,7 +9,7 @@ keeps the doc's current-state table in sync with the newest measurements:
     python tools/bench_all.py --res 640x360 1280x720   # custom resolutions
     python tools/bench_all.py --no-snapshot            # measure only; don't touch the doc
 
-Each model script runs in its own subprocess, so one OOM or crash (e.g. a FILM
+Each model script runs in its own subprocess, so one OOM or crash (e.g. an
 engine build with little free VRAM) is reported and skipped without killing
 the rest of the run. The snapshot is regenerated from whatever succeeded —
 stale rows keep their last good numbers until re-measured.
@@ -32,7 +32,6 @@ FI_SCRIPTS = [
     "tools/benchmark_rife.py",
     "tools/benchmark_gmfss.py",
     "tools/benchmark_m2m.py",
-    "tools/benchmark_film.py",
 ]
 SR_SCRIPTS = ["tools/benchmark_sr.py"]
 

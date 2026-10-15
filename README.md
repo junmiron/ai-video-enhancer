@@ -30,7 +30,7 @@ output on top.
   Compact i2 (anime), Real-ESRGAN x4plus (live action) — TensorRT fp16 with
   PyTorch-CUDA fallback, automatic tiled mode as a VRAM safety valve.
 - **Frame interpolation**: RIFE 4.25 family (Lite/Balanced/Heavy) + experimental
-  GMFSS, M2M and FILM; scene-cut protection, de-duplication of held frames, any
+  GMFSS and M2M; scene-cut protection, de-duplication of held frames, any
   multiplier (target-FPS or fixed ×).
 - **Artifact QA** (the differentiator): detects flicker, ghosting, banding,
   halo/ringing, line-art drift, color drift and regression frames after the AI

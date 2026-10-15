@@ -202,22 +202,6 @@ def test_build_fi_runner_routes_m2m(monkeypatch):
     assert calls["args"] == ("/some/file.pth", 1920, 1080)
 
 
-def test_build_fi_runner_routes_film(monkeypatch):
-    """'film' builds a FILMRunner, passing the bundled ONNX path straight through."""
-    from aive.stages.interpolate import film_model
-
-    calls = {}
-
-    class _Stub:
-        def __init__(self, weights_path, width, height):
-            calls["args"] = (weights_path, width, height)
-
-    monkeypatch.setattr(film_model, "FILMRunner", _Stub)
-    runner = build_fi_runner("film", "/some/file.onnx", 1920, 1080)
-    assert isinstance(runner, _Stub)
-    assert calls["args"] == ("/some/file.onnx", 1920, 1080)
-
-
 def test_build_fi_runner_routes_rife_variants(monkeypatch):
     """Every RIFE variant routes to RIFERunner with the right variant tag."""
     from aive.stages.interpolate import stage as st

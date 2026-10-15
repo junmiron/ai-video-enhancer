@@ -20,7 +20,7 @@ def test_rife_variants_have_pinned_hashes():
 
 def test_experimental_models_flagged():
     models = load_manifest()
-    for name in ("m2m", "gmfss", "film", "amt_sicdia"):
+    for name in ("m2m", "gmfss", "amt_sicdia"):
         assert models[name].experimental is True, f"{name} should be experimental"
         assert models[name].task == "fi"
     # Stable pipeline models are not flagged.

@@ -46,7 +46,6 @@ dates in §4) and re-verified on 2026-09-22 where noted.
 | rife_425_heavy | fi | MIT (community mirror of the same arch family) | TAS-Models-Host | — | M2 09-17; sha-pinned |
 | gmfss | fi | **no license file upstream** (routineLife1/GMFSS, archived); code MIT via GMFSS_Fortuna | TAS-Models-Host union bundle | ⚠️ unlicensed weights | M2.x 09-21 (repo inspection); Fortuna LICENSE re-read 2026-09-22; sha-pinned |
 | m2m | fi | **Adobe Research License** — non-commercial research only, no redistribution | Google Drive (official) | ⚠️ research-only | M2.x 09-21; upstream LICENSE re-read 2026-09-22; sha-pinned |
-| film | fi | **Apache-2.0** (google-research/frame-interpolation) | locally bundled ONNX converted from the official Style SavedModel | — | M2.x 09-22; upstream LICENSE re-read 2026-09-22; sha-pinned |
 | amt_sicdia | fi | **TBD** — registered only, no adapter, download disabled (no URLs) | — | ⚠️ TBD | M2 09-17 (public weights not located); nothing ships until implemented |
 | scunet | restore | personal use (TAS mirror of KAIR v1.0 color-real-psnr; arch Apache-2.0) | TAS-Models-Host | — | M4.x 09-19 (strict CPU load vs real weights); sha-pinned |
 | deepdeband_f | restore | personal use (TAS mirror; archs BSD-3 + MIT) | TAS-Models-Host | — | M4.x 09-19 (strict CPU load); sha-pinned |

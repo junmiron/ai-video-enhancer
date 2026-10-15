@@ -123,13 +123,11 @@ def test_run_pipeline_sr_first_dim_flow(static_clip: str, tmp_path: Path, monkey
         ("RIFERunner", "_pad"),
         ("GMFSSRunner", "_pad"),
         ("M2MRunner", "_to_gpu"),
-        ("FILMRunner", "_pad"),
     ],
 )
 def test_fi_runner_rejects_mismatched_frame_dims(runner_cls: str, method: str):
     """A frame whose dims differ from the runner's build dims must raise a clear,
     actionable error instead of a cryptic numpy broadcast / TRT shape failure."""
-    import aive.stages.interpolate.film_model as film_mod
     import aive.stages.interpolate.gmfss_model as gmfss_mod
     import aive.stages.interpolate.m2m_model as m2m_mod
     import aive.stages.interpolate.stage as stage_mod
@@ -138,7 +136,6 @@ def test_fi_runner_rejects_mismatched_frame_dims(runner_cls: str, method: str):
         "RIFERunner": stage_mod.RIFERunner,
         "GMFSSRunner": gmfss_mod.GMFSSRunner,
         "M2MRunner": m2m_mod.M2MRunner,
-        "FILMRunner": film_mod.FILMRunner,
     }[runner_cls]
 
     self = SimpleNamespace(width=320, height=240)  # guard reads only build dims
