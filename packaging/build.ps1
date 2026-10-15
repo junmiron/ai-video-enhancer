@@ -26,14 +26,37 @@ if (-not $SkipPyInstaller) {
     Write-Host "== 1/3 PyInstaller - skipped (-SkipPyInstaller) ==" -ForegroundColor Cyan
 }
 
-Write-Host "== 2/3 Bundle FFmpeg from $FfmpegDir ==" -ForegroundColor Cyan
+Write-Host "== 2/3 Bundle FFmpeg ==" -ForegroundColor Cyan
+# Resolve an FFmpeg bin dir that actually contains both tools. The default is a
+# versioned WinGet path, but WinGet auto-updates rename it (e.g. ffmpeg-9.0.1 ->
+# 9.0.2), so if the configured dir is missing we glob for any Gyan full_build bin
+# under the WinGet package root and pick the newest. -FfmpegDir still overrides.
+$tools = @("ffmpeg.exe", "ffprobe.exe")
+function Test-FfmpegBin([string]$dir) {
+    if (-not $dir) { return $false }
+    foreach ($t in $tools) { if (-not (Test-Path (Join-Path $dir $t))) { return $false } }
+    return $true
+}
+$ffbin = $null
+if (Test-FfmpegBin $FfmpegDir) {
+    $ffbin = $FfmpegDir
+} else {
+    $wingetRoot = "C:\Users\junmi\AppData\Local\Microsoft\WinGet\Packages"
+    if (Test-Path $wingetRoot) {
+        $bins = @(Get-ChildItem -Path $wingetRoot -Directory -Filter "Gyan.FFmpeg*" -ErrorAction SilentlyContinue |
+            ForEach-Object { Get-ChildItem -Path $_.FullName -Directory -Filter "*-full_build" -ErrorAction SilentlyContinue } |
+            Where-Object { Test-FfmpegBin (Join-Path $_.FullName "bin") } |
+            Sort-Object LastWriteTime)
+        if ($bins.Count -gt 0) { $ffbin = Join-Path $bins[-1].FullName "bin" }
+    }
+}
+if (-not $ffbin) {
+    throw "FFmpeg (ffmpeg.exe + ffprobe.exe) not found. Pass -FfmpegDir <path-to-bin>."
+}
+Write-Host "Using FFmpeg: $ffbin" -ForegroundColor DarkGray
 $bin = Join-Path $PSScriptRoot "ffmpeg-bin"
 New-Item -ItemType Directory -Force $bin | Out-Null
-foreach ($t in @("ffmpeg.exe", "ffprobe.exe")) {
-    $src = Join-Path $FfmpegDir $t
-    if (-not (Test-Path $src)) { throw "FFmpeg tool not found: $src" }
-    Copy-Item $src (Join-Path $bin $t) -Force
-}
+foreach ($t in $tools) { Copy-Item (Join-Path $ffbin $t) (Join-Path $bin $t) -Force }
 
 if ($SkipInstaller) { return }
 
