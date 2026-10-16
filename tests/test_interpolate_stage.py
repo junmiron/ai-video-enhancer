@@ -522,7 +522,7 @@ def test_amt_l_torch_sanity():
     from aive.stages.interpolate.amt_model import AMTRunner
 
     weights = _amt_weights("l")
-    runner = AMTRunner(weights, width=160, height=128)
+    runner = AMTRunner(weights, width=160, height=128, variant="l")
     frames = _moving_frames(3, w=160, h=128)
     out = runner(frames[0], frames[2], 0.5)
     assert out.shape == (128, 160, 3) and out.dtype == np.uint8

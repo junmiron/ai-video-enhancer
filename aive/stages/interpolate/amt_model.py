@@ -84,7 +84,8 @@ class AMTRunner:
         # Same UHD precision rule as RIFERunner/GMFSSRunner: fp32 at/above UHD,
         # fp16 below.
         self.uhd = width > 1920 and height > 1080
-        dtype = torch.float32 if self.uhd else torch.float16
+        # Using fp32 for stability; fp16 requires careful dtype casting in grid_sample/conv paths
+        dtype = torch.float32
 
         model = build_amt(self.variant)
         load_amt_weights(model, weights_path)
