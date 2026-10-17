@@ -55,24 +55,29 @@ try {
 $size = [int64](Get-Item $zipPath).Length
 Write-Host ("Zip size: {0:N2} GB" -f ($size / 1GB)) -ForegroundColor Cyan
 
-if ($size -gt [int64]1.9 * 1024 * 1024 * 1024) {
-    $partSize = [int64]1.85 * 1024 * 1024 * 1024
+# NOTE: parentheses are REQUIRED - PowerShell's cast precedence makes
+# `[int64]1.85 * 1024 * 1024 * 1024` evaluate to exactly 2 GiB, which GitHub rejects.
+if ($size -gt [int64](1.9 * 1GB)) {
+    $partSize = [int64](1.85 * 1GB)
+    # NOTE: the inner loop must fully consume each buffer before the outer
+    # Read() refills it - otherwise a part boundary mid-buffer drops bytes.
     $fs = [System.IO.File]::OpenRead($zipPath)
     $n = 0; $partStream = $null; $inPart = [int64]0
     try {
         $buf = New-Object byte[] (64 * 1024 * 1024)
         while (($read = $fs.Read($buf, 0, $buf.Length)) -gt 0) {
-            if ($null -eq $partStream) {
-                $n++
-                $partPath = "{0}.part{1:D2}" -f $zipPath, $n
-                $partStream = [System.IO.File]::Create($partPath)
-                $inPart = 0
-            }
-            while ($read -gt 0) {
-                $w = [Math]::Min([int64]$read, $partSize - $inPart)
-                $partStream.Write($buf, 0, $w)
-                $read -= $w; $inPart += $w
-                if ($inPart -ge $partSize) { $partStream.Close(); $partStream = $null; break }
+            $off = 0
+            while ($off -lt $read) {
+                if ($null -eq $partStream) {
+                    $n++
+                    $partPath = "{0}.part{1:D2}" -f $zipPath, $n
+                    $partStream = [System.IO.File]::Create($partPath)
+                    $inPart = 0
+                }
+                $w = [Math]::Min([int64]($read - $off), $partSize - $inPart)
+                $partStream.Write($buf, $off, $w)
+                $off += $w; $inPart += $w
+                if ($inPart -ge $partSize) { $partStream.Close(); $partStream = $null }
             }
         }
     } finally {
