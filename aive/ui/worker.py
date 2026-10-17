@@ -251,16 +251,18 @@ def _make_sample(cmd: dict, evt_q) -> None:
     if not dest:
         _emit(evt_q, {"type": "sample_error", "error": "no destination path given"})
         return
-    from ..stages.ingest import run_hidden
+    # In-process call (not a subprocess): frozen onefile builds cannot re-execute
+    # the bundled exe with an arbitrary .py argument; importing keeps one code
+    # path for dev and all packaged layouts. Static import -> PyInstaller bundles
+    # tools.make_sample_clip + Pillow automatically.
+    from ..stages.ingest import find_ffmpeg
+    from tools.make_sample_clip import make_clip
 
-    script = Path(__file__).resolve().parent.parent.parent / "tools" / "make_sample_clip.py"
     try:
-        proc = run_hidden(
-            [sys.executable, str(script), dest], capture_output=True, text=True, timeout=900
-        )
-        if proc.returncode != 0 or not os.path.exists(dest):
-            raise RuntimeError((proc.stderr or proc.stdout or "sample generation failed")[:500])
-        _emit(evt_q, {"type": "sample_ready", "path": dest})
+        out = make_clip(dest, ffmpeg=find_ffmpeg())
+        if not os.path.exists(out):
+            raise RuntimeError("sample generation failed")
+        _emit(evt_q, {"type": "sample_ready", "path": str(out)})
     except Exception as exc:
         log.exception("Sample clip generation failed")
         _emit(evt_q, {"type": "sample_error", "error": str(exc)})

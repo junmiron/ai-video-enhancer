@@ -23,6 +23,9 @@ Notes on collection strategy:
   * multiprocessing spawn works frozen: CPython launches children with
     ``exe --multiprocessing-fork`` and PyInstaller's bootloader handles it; the
     worker target (aive.ui.worker.worker_main) is statically importable in-bundle.
+  * tools.make_sample_clip is bundled explicitly (hiddenimports): the worker
+    generates sample clips IN-PROCESS (frozen exes cannot re-run arbitrary .py),
+    which also pulls Pillow along via its hook.
 """
 import os
 
@@ -38,7 +41,11 @@ a = Analysis(
     pathex=[REPO],
     binaries=pyside_binaries,
     datas=pyside_datas + [(os.path.join(REPO, "assets"), "assets")],
-    hiddenimports=[*pyside_hiddenimports, "torchgen"],  # torchgen: imported by torch at runtime
+    hiddenimports=[
+        *pyside_hiddenimports,
+        "torchgen",               # imported by torch at runtime
+        "tools.make_sample_clip",  # in-process sample-clip generation (aive.ui.worker)
+    ],
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],

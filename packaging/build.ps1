@@ -1,10 +1,14 @@
-# AI Video Enhancer - one-shot build script (M7 B)
+# AI Video Enhancer - one-shot build script (M7 B/C)
 #
-#   powershell -ExecutionPolicy Bypass -File packaging\build.ps1
+#   powershell -ExecutionPolicy Bypass -File packaging\build.ps1            # onedir + installer
 #
-# Steps: 1) PyInstaller onedir bundle -> dist\ai-video-enhancer\
-#        2) copy ffmpeg.exe/ffprobe.exe into packaging\ffmpeg-bin\ (for the installer)
-#        3) Inno Setup installer -> packaging\output\*.exe   (skipped if ISCC missing)
+# Default steps: 1) PyInstaller onedir bundle -> dist\ai-video-enhancer\
+#                2) copy ffmpeg.exe/ffprobe.exe into packaging\ffmpeg-bin\ (for the installer)
+#                3) Inno Setup installer -> packaging\output\*.exe   (skipped if ISCC missing)
+#
+# NOTE: a single self-contained .exe is NOT possible - PyInstaller's onefile
+# archive format uses 32-bit offsets (~4 GB cap) and the bundle is ~6 GB.
+# See BUILD.md "Release ZIP for GitHub" for how to ship one file instead.
 
 param(
     [string]$Python = "C:\Python314\python.exe",
@@ -18,19 +22,7 @@ $ErrorActionPreference = "Stop"
 $repo = Split-Path -Parent $PSScriptRoot
 Set-Location $repo
 
-if (-not $SkipPyInstaller) {
-    Write-Host "== 1/3 PyInstaller (onedir, multi-GB - this takes a while) ==" -ForegroundColor Cyan
-    & $Python -m PyInstaller packaging/aive.spec --noconfirm
-    if ($LASTEXITCODE -ne 0) { throw "PyInstaller failed (exit $LASTEXITCODE)" }
-} else {
-    Write-Host "== 1/3 PyInstaller - skipped (-SkipPyInstaller) ==" -ForegroundColor Cyan
-}
-
-Write-Host "== 2/3 Bundle FFmpeg ==" -ForegroundColor Cyan
-# Resolve an FFmpeg bin dir that actually contains both tools. The default is a
-# versioned WinGet path, but WinGet auto-updates rename it (e.g. ffmpeg-9.0.1 ->
-# 9.0.2), so if the configured dir is missing we glob for any Gyan full_build bin
-# under the WinGet package root and pick the newest. -FfmpegDir still overrides.
+# --- FFmpeg resolution (shared by both modes) ----------------------------------
 $tools = @("ffmpeg.exe", "ffprobe.exe")
 function Test-FfmpegBin([string]$dir) {
     if (-not $dir) { return $false }
@@ -50,6 +42,17 @@ if (Test-FfmpegBin $FfmpegDir) {
         if ($bins.Count -gt 0) { $ffbin = Join-Path $bins[-1].FullName "bin" }
     }
 }
+
+# --- Onedir bundle + installer (default) ----------------------------------------
+if (-not $SkipPyInstaller) {
+    Write-Host "== 1/3 PyInstaller (onedir, multi-GB - this takes a while) ==" -ForegroundColor Cyan
+    & $Python -m PyInstaller packaging/aive.spec --noconfirm
+    if ($LASTEXITCODE -ne 0) { throw "PyInstaller failed (exit $LASTEXITCODE)" }
+} else {
+    Write-Host "== 1/3 PyInstaller - skipped (-SkipPyInstaller) ==" -ForegroundColor Cyan
+}
+
+Write-Host "== 2/3 Bundle FFmpeg ==" -ForegroundColor Cyan
 if (-not $ffbin) {
     throw "FFmpeg (ffmpeg.exe + ffprobe.exe) not found. Pass -FfmpegDir <path-to-bin>."
 }
@@ -72,7 +75,7 @@ if (-not $iscc) {
     return
 }
 & $iscc (Join-Path $PSScriptRoot "ai-video-enhancer.iss")
-if ($LASTEXITCODE -ne 0) { throw "ISCC failed (exit $LASTEXITCODE)" }
+if ($LASTEXITCODE -ne 0) { throw "Inno Setup failed (exit $LASTEXITCODE)" }
 
 Write-Host ""
 Write-Host "Done:" -ForegroundColor Green

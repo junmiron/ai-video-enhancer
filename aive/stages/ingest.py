@@ -17,26 +17,33 @@ import numpy as np
 log = logging.getLogger(__name__)
 
 
-def _bundled_tool_dir() -> Path | None:
-    """Folder holding bundled ffmpeg/ffprobe for packaged builds (M7 B).
+def _bundled_tool_dirs() -> list[Path]:
+    """Candidate folders holding bundled ffmpeg/ffprobe, in priority order.
 
-    PyInstaller onedir: ``<app>/ffmpeg/`` next to the executable. Dev checkout:
-    ``<repo>/tools/ffmpeg/``. Lets the installer ship FFmpeg without touching PATH.
+    Frozen onefile: ``<sys._MEIPASS>/ffmpeg`` (extracted from the single exe).
+    Frozen onedir / installed: ``<app>/ffmpeg/`` next to the executable.
+    Dev checkout: ``<repo>/tools/ffmpeg/``. Lets builds ship FFmpeg without
+    touching PATH; first existing candidate wins.
     """
     if getattr(sys, "frozen", False):
-        return Path(sys.executable).resolve().parent / "ffmpeg"
-    return Path(__file__).resolve().parents[2] / "tools" / "ffmpeg"
+        dirs = []
+        meipass = getattr(sys, "_MEIPASS", None)
+        if meipass:
+            dirs.append(Path(meipass) / "ffmpeg")  # onefile: inside the bundle
+        dirs.append(Path(sys.executable).resolve().parent / "ffmpeg")  # onedir/installed
+        return dirs
+    return [Path(__file__).resolve().parents[2] / "tools" / "ffmpeg"]
 
 
 def _find_tool(name: str) -> str | None:
     exe = shutil.which(name)
     if exe:
         return exe
-    d = _bundled_tool_dir()
-    for suffix in (".exe", ""):  # Windows first, then POSIX
-        p = d / f"{name}{suffix}"
-        if p.exists():
-            return str(p)
+    for d in _bundled_tool_dirs():
+        for suffix in (".exe", ""):  # Windows first, then POSIX
+            p = d / f"{name}{suffix}"
+            if p.exists():
+                return str(p)
     return None
 
 

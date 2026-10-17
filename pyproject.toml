@@ -16,10 +16,21 @@ dependencies = [
     "onnx",
     "tensorrt",
     "scenedetect[opencv]",
+    # GUI
+    "PySide6",
+    # sample-clip generator (tools/make_sample_clip.py)
+    "pillow",
+    # model architectures (depth / SCUNet repair)
+    "einops",
+    "timm",
+    "safetensors",
 ]
 
 [project.optional-dependencies]
 dev = ["pytest"]
+# Optional speed-ups: xformers accelerates the depth models; onnxruntime is only
+# needed to re-export LIMBO ONNX->TRT (tools/depth export helper).
+speed = ["xformers", "onnxruntime"]
 
 [tool.setuptools.packages.find]
 include = ["aive*"]

@@ -204,6 +204,7 @@ For an input `myvideo.mp4` you get, next to the original:
 | *No NVIDIA GPU detected* banner | The app needs a CUDA-capable NVIDIA GPU; nothing else runs without one. |
 | *TensorRT engine build failed / skipped — using PyTorch-CUDA* in the log | Not an error: another process (e.g. a local LLM server) is holding most of the VRAM, so the app used its fallback path. Close the other GPU workload for full speed; no action needed otherwise. |
 | *Out of memory* on a job | Lower the resolution target, use a smaller model (Cyte V1 / RIFE Lite), or free VRAM. The app fails the job with a clear message rather than corrupting output. |
+| *ffmpeg not found* error when a job starts | Bundled builds ship FFmpeg in an `ffmpeg\` folder next to the exe — keep it together with `_internal\` if you move things around. Running from source: install a full build (`winget install Gyan.FFmpeg`) or drop `ffmpeg.exe` + `ffprobe.exe` into `tools\ffmpeg\`. |
 | Model download failure | The downloader retries 3× with backoff and falls back to mirrors; persistent failures are usually network-side. Delete the partial file under `%LOCALAPPDATA%\ai-video-enhancer\models\` and retry. |
 | *Disk full* mid-run | The job fails cleanly; nothing is left half-written in your output location (lossless workspace chunks may remain if you enabled "keep workspace"). |
 | Job cancelled | Safe at any point — finished jobs are untouched. Re-queue the video to run it again. |

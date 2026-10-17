@@ -5,7 +5,7 @@ interpolation, and then **automatically detects artifacts introduced by the
 upscale/interpolation and repairs them** — with a friendly UI and a transparent
 artifact report. Personal-use Windows app for NVIDIA GPUs (CUDA + TensorRT).
 
-## Status: v1 beta shipped (M0–M8 complete)
+## Status: v1 beta shipped (M0–M10 complete)
 
 | Document | Purpose |
 |---|---|
@@ -14,7 +14,7 @@ artifact report. Personal-use Windows app for NVIDIA GPUs (CUDA + TensorRT).
 | [docs/plan.md](<docs/plan.md>) | Phased implementation plan with milestones and acceptance criteria (progress log at the bottom) |
 | [docs/licenses.md](<docs/licenses.md>) | License audit: per-model weight/arch tables + verification dates |
 | [docs/benchmarks.md](<docs/benchmarks.md>) | Measured throughput tables (auto-updated snapshot + per-milestone findings); re-run with `python tools/bench_all.py` |
-| [packaging/BUILD.md](<packaging/BUILD.md>) | How to build the Windows package (`powershell -File packaging\build.ps1`) |
+| [packaging/BUILD.md](<packaging/BUILD.md>) | How to build the Windows package, installer and release ZIP (`powershell -File packaging\build.ps1`) |
 
 ## One-paragraph pitch
 
@@ -28,10 +28,12 @@ output on top.
 
 - **Upscale**: ShuffleCUGAN x2, Fallin soft/strong, SPAN V2, Cyte V1, OpenProteus
   Compact i2 (anime), Real-ESRGAN x4plus (live action) — TensorRT fp16 with
-  PyTorch-CUDA fallback, automatic tiled mode as a VRAM safety valve.
-- **Frame interpolation**: RIFE 4.25 family (Lite/Balanced/Heavy) + experimental
-  GMFSS and M2M; scene-cut protection, de-duplication of held frames, any
-  multiplier (target-FPS or fixed ×).
+  PyTorch-CUDA fallback, automatic tiled mode as a VRAM safety valve. Integer-power
+  targets beyond a model's native scale (e.g. ×4 on an ×2 model) are reached by
+  **cascading AI passes** — no plain resampling in between.
+- **Frame interpolation**: RIFE 4.25 family (Lite/Balanced/Heavy), GMFSS, M2M and
+  AMT-S / AMT-L (CVPR'23) — scene-cut protection, de-duplication of held frames,
+  any multiplier (target-FPS or fixed ×).
 - **Artifact QA** (the differentiator): detects flicker, ghosting, banding,
   halo/ringing, line-art drift, color drift and regression frames after the AI
   stages; applies targeted repairs (incl. SCUNet + deepDeband-f AI models),
@@ -42,16 +44,61 @@ output on top.
 - **UI**: PySide6 dark theme — queue + presets, per-stage progress with VRAM/RAM
   meters and live log, before/after preview with artifact markers, report view.
 
-## Quick start (dev machine)
+## Get it
+
+### Option 1 — release ZIP (no build needed)
+
+Download the latest `ai-video-enhancer-<ver>-win-x64.zip` from
+[Releases](https://github.com/junmiron/ai-video-enhancer/releases). GitHub caps
+each release asset at 2 GB, so the archive ships as **split parts** — reassemble
+once, then extract:
+
+```bat
+:: Windows cmd (adjust part count to what you downloaded)
+copy /b ai-video-enhancer-0.1.0-win-x64.zip.part01 + ^
+        ai-video-enhancer-0.1.0-win-x64.zip.part02 + ^
+        ai-video-enhancer-0.1.0-win-x64.zip.part03 = ai-video-enhancer-0.1.0-win-x64.zip
+
+:: then extract (built-in tar, or right-click -> Extract All)
+tar -xf ai-video-enhancer-0.1.0-win-x64.zip
+```
+
+Run `ai-video-enhancer\ai-video-enhancer.exe`. Requirements: Windows 10/11 x64 +
+NVIDIA GPU with a current driver. FFmpeg is bundled inside the folder (no PATH
+setup); model weights download on first use and are cached under
+`%LOCALAPPDATA%\ai-video-enhancer\models\`.
+
+### Option 2 — build from source
+
+Prerequisites:
+
+- Windows 10/11 x64, NVIDIA GPU with a current driver (CUDA)
+- Python 3.11–3.14 (3.14 verified): `winget install Python.Python.3.14` or python.org
+- FFmpeg full build: `winget install Gyan.FFmpeg` — or drop `ffmpeg.exe` +
+  `ffprobe.exe` into `tools\ffmpeg\` in the repo
 
 ```powershell
-# run from source (Python 3.14 with the project deps installed)
-C:\Python314\python.exe run_gui.py
+git clone https://github.com/junmiron/ai-video-enhancer.git
+cd ai-video-enhancer
 
-# or build the portable bundle (~8 min; multi-GB output under dist\)
-powershell -ExecutionPolicy Bypass -File packaging\build.ps1
-dist\ai-video-enhancer\ai-video-enhancer.exe
+python -m venv .venv
+.\.venv\Scripts\Activate.ps1
+pip install -e .                 # numpy, opencv, torch (CUDA), tensorrt, PySide6, ...
+# optional: pip install -e ".[speed]"   # xformers (depth speed-up) + onnxruntime (LIMBO re-export)
+
+python run_gui.py                # run from source
 ```
+
+Build the distributable bundle (~8–15 min; multi-GB output under `dist\`):
+
+```powershell
+pip install pyinstaller
+powershell -ExecutionPolicy Bypass -File packaging\build.ps1
+.\dist\ai-video-enhancer\ai-video-enhancer.exe
+```
+
+See [packaging/BUILD.md](<packaging/BUILD.md>) for the full build matrix
+(onedir bundle, Inno Setup installer, GitHub release ZIP).
 
 Model weights download on first use (cached under
 `%LOCALAPPDATA%\ai-video-enhancer\models\`). No video handy? Use *Generate

@@ -6,6 +6,7 @@ Produces two artifacts from a clean checkout on the dev machine:
 |---|---|---|
 | Portable bundle | `dist/ai-video-enhancer/` | PyInstaller **onedir**: `ai-video-enhancer.exe` + `_internal/` (Python, torch+TensorRT, Qt). Runnable as-is if ffmpeg is on PATH. |
 | Installer | `packaging/output/ai-video-enhancer-setup-0.1.0.exe` | Inno Setup installer: bundle **plus** FFmpeg under `<install>\ffmpeg\`, which the app finds automatically in frozen builds (`aive/stages/ingest.py`). |
+| Release ZIP | `dist/ai-video-enhancer-<ver>-win-x64.zip[.partNN]` | The whole bundle (exe + `_internal` + `ffmpeg`) as one logical zip for GitHub Releases; split into <2 GB parts when needed (see below). |
 
 ## Prerequisites (dev machine)
 
@@ -39,6 +40,37 @@ Copy-Item <ffmpeg-bin>\ffmpeg.exe, <ffmpeg-bin>\ffprobe.exe packaging\ffmpeg-bin
 # 3. Installer
 & "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" packaging\ai-video-enhancer.iss
 ```
+
+## Release ZIP for GitHub
+
+GitHub release assets are capped at **2 GB each**, and this bundle is ~6 GB, so a
+release ships as one logical ZIP split into `.partNN` files. A true single-`.exe`
+portable build is **not possible**: PyInstaller's onefile archive format uses
+32-bit offsets/sizes (~4 GB hard cap) — an onefile spec was attempted in Oct 2026
+and failed with `struct.error: 'I' format requires 0 <= number <= 4294967295`.
+Do not retry it; the split-ZIP release is the shipping format.
+
+```powershell
+# after a fresh build.ps1 run (which stages FFmpeg into packaging\ffmpeg-bin\):
+powershell -ExecutionPolicy Bypass -File packaging\make_release_zip.ps1 [-Version 0.1.0]
+```
+
+What it does: 1) copies `ffmpeg.exe`/`ffprobe.exe` into the bundle's `ffmpeg\`
+folder so the release is self-contained (frozen builds find `<exe>\ffmpeg\`),
+2) zips the whole `ai-video-enhancer\` folder with 7-Zip (`-tzip -mx=1`, fast;
+ZIP64 handled automatically for >4 GB), 3) if the zip exceeds ~1.9 GB, splits it
+into ~1.85 GB `.partNN` files and prints the reassemble command.
+
+Users reassemble before extracting (Windows cmd):
+
+```bat
+copy /b ai-video-enhancer-0.1.0-win-x64.zip.part01 + ^
+        ai-video-enhancer-0.1.0-win-x64.zip.part02 + ^
+        ai-video-enhancer-0.1.0-win-x64.zip.part03 = ai-video-enhancer-0.1.0-win-x64.zip
+tar -xf ai-video-enhancer-0.1.0-win-x64.zip
+```
+
+Upload the parts as release assets via `gh release create` (see README "Get it").
 
 ## How the frozen app finds its pieces
 

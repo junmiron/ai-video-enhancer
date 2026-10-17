@@ -160,8 +160,12 @@ def render(t: int) -> np.ndarray:
     return img
 
 
-def make_clip(dest: str | Path) -> Path:
-    """Render the scene and encode it to `dest` (MP4). Returns the path."""
+def make_clip(dest: str | Path, ffmpeg: str | None = None) -> Path:
+    """Render the scene and encode it to `dest` (MP4). Returns the path.
+
+    ``ffmpeg`` is the resolved binary path; falls back to bare ``ffmpeg`` on PATH
+    when omitted (standalone dev usage).
+    """
     dest = Path(dest)
     dest.parent.mkdir(parents=True, exist_ok=True)
     frames_dir = Path(tempfile.mkdtemp(prefix="aive-sample-"))
@@ -170,7 +174,7 @@ def make_clip(dest: str | Path) -> Path:
             Image.fromarray(render(t)).save(frames_dir / f"f_{t:03d}.png")
         subprocess.run(
             [
-                "ffmpeg", "-v", "error", "-y",
+                ffmpeg or "ffmpeg", "-v", "error", "-y",
                 "-framerate", str(FPS), "-i", str(frames_dir / "f_%03d.png"),
                 "-f", "lavfi", "-i", f"sine=frequency=440:duration={N / FPS:.2f}",
                 "-c:v", "libx264", "-pix_fmt", "yuv420p", "-preset", "medium", "-crf", "17",
