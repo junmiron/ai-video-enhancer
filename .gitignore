@@ -25,3 +25,6 @@ samples/
 
 # Locally-bundled model files (personal use; not committed)
 assets/models/bundled/
+
+# staged FFmpeg binaries (build artifact; re-staged by packaging/build.ps1)
+packaging/ffmpeg-bin/
