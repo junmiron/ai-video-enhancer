@@ -25,8 +25,10 @@ class ModelInfo:
     recommended_for: str = ""
     notes: str = ""
     experimental: bool = False  # listed in the UI but not part of the stable pipeline
+    kind: str = "frame"  # frame (per-frame CNN SR) | clip (temporal diffusion SR, e.g. SeedVR2)
     extract_member: str | None = None  # if set, the download is an archive; this member becomes the weights file
     extract_members: dict[str, str] | None = None  # multi-file bundles: {archive member: output filename}; download_model returns the directory
+    files: list[dict] | None = None  # multi-file models: [{url, sha256, name}]; each is downloaded separately into the cache dir; download_model returns the directory
     bundled: str | None = None  # personal-use local model file (path relative to assets/models/); copied into cache instead of downloaded
 
 

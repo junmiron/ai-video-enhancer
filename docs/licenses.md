@@ -1,8 +1,9 @@
 # License Audit — AI Video Enhancer
 
 **Audit date: 2026-09-22 (M8c).** Scope: everything the app ships or downloads —
-app code, vendored model architectures, runtime dependencies, and all 20 model
-weights in [`assets/models/manifest.json`](../assets/models/manifest.json).
+app code, vendored model architectures, runtime dependencies, and all 22 model
+weights in [`assets/models/manifest.json`](../assets/models/manifest.json)
+(incl. SeedVR2-3B's 4-file bundle).
 
 Context: this is a **personal-use** application (project decision D3), so
 non-commercial (NC) and research-only weights are acceptable here. They are
@@ -29,6 +30,7 @@ dates in §4) and re-verified on 2026-09-22 where noted.
 | `_gmfss/` (GMFSS) | code **MIT** (© 2023 98mxr); our fp16 dtype fixes are ours | vendored from GMFSS_Fortuna | Weights separately flagged (§4). |
 | `_m2m/` (M2M) | **Adobe Research License** (non-commercial research only, no redistribution) | vendored from M2M_VFI (feinanshan); cupy kernels rewritten in pure torch by us with identical math | Code *and* weights under the Adobe license — personal use only (§4). |
 | `depth/_da3/`, `_limbo_export.py` etc. (DA3/Limbo) | **Apache-2.0** (Depth-Anything-3 runtime) | vendored from Depth-Anything-3 | Limbo checkpoints are anime finetunes of DA3-small (§4). |
+| SeedVR2 (`upscale/_seedvr/` runner + vendored NaDiT + Video-VAE-v3) | **Apache-2.0** (© 2025 Bytedance Ltd.) | vendored from ByteDance-Seed/SeedVR (`common`, `models/dit_v2`, `models/video_vae_v3`, `projects/video_diffusion_sr/infer.py`) | Implemented 2026-10-19 (Phase B) — GPU verification pending; weights not committed, downloaded on first use (§6). No NC restriction on the model card. |
 | SCUNet arch (`qa/repairs/_scunet_arch.py`) | **Apache-2.0** | cszn/SCUNet | Weights: personal-use TAS mirror of KAIR v1.0. |
 | deepDeband-f arch (`qa/repairs/_deepdeband_arch.py`) | **BSD-3 + MIT** (pytorch-CycleGAN-and-pix2pix / RaymondLZhou/deepDeband) | vendored from both | Weights: personal-use TAS mirror. |
 
@@ -42,6 +44,7 @@ dates in §4) and re-verified on 2026-09-22 where noted.
 | cyte_v1 | sr | **CC BY-NC 4.0** | NevermindNilas/Ai-models | ⚠️ NC | M3.x 09-17 (repo README); sha-pinned |
 | openproteus | sr | personal use (TAS mirror) | TAS-Models-Host | — | M3.x 09-17; sha-pinned |
 | realesrgan_x4plus | sr | **non-commercial** (release-page terms; code is BSD-3) | xinntao/Real-ESRGAN releases | ⚠️ NC | M3 09-17; re-checked LICENSE (BSD-3) + README 2026-09-22; sha-pinned |
+| seedvr_anime (SeedVR2-3B) | sr | **Apache-2.0** (ByteDance; code + weights) | Hugging Face (`ByteDance-Seed/SeedVR2-3B`, official) | — | 2026-10-19: all 4 files downloaded, SHA-256 verified (§6); CPU strict-load of both checkpoints OK (plain state dicts, no EMA wrapper) |
 | rife_425 / _lite | fi | **MIT** (Practical-RIFE) | Google Drive (official) / TAS mirror | — | M2 09-17; sha-pinned |
 | rife_425_heavy | fi | MIT (community mirror of the same arch family) | TAS-Models-Host | — | M2 09-17; sha-pinned |
 | gmfss | fi | **no license file upstream** (routineLife1/GMFSS, archived); code MIT via GMFSS_Fortuna | TAS-Models-Host union bundle | ⚠️ unlicensed weights | M2.x 09-21 (repo inspection); Fortuna LICENSE re-read 2026-09-22; sha-pinned |
@@ -97,3 +100,4 @@ each), swap FFmpeg for an LGPL-clean build, and re-run this audit.
 | 2026-09-21 (M2.x) | GMFSS code MIT (Fortuna), weights unlicensed upstream; M2M Adobe Research License (code+weights); multi-file bundle integrity | Repo inspection + downloads; manifest sha pins |
 | 2026-09-22 (M8c, this audit) | FILM Apache-2.0; M2M Adobe license text re-read; GMFSS_Fortuna MIT re-read; TAS AGPL noted; **spandrel LICENSE = MIT** + `upcunet_v3.py` provenance (bilibili-derived); Real-ESRGAN LICENSE (BSD-3) + current README re-checked; bilibili/Real-CUGAN-models confirmed deleted (404) | Local upstream clones in the session scratchpad + raw fetches from GitHub (spandrel, Real-ESRGAN); results recorded above |
 | 2026-10-15 (FILM removal) | **FILM removed from product** — no longer bundled or shipped, so its Apache-2.0 license is no longer relevant to distribution; all other model licenses unchanged | Code/manifest/bundle inspection after removal; full test suite green |
+| 2026-10-18 → 19 (SeedVR2 research + integration) | SeedVR2-3B **Apache-2.0** (© Bytedance); repo has exactly 4 files — `seedvr2_ema_3b.pth` (~12.6 GB), `ema_vae.pth`, `pos_emb.pt`, `neg_emb.pt`. All four downloaded and SHA-256 verified: DiT `6bcc5ac59447e97b…`, VAE `c7df8a67e68b7f9a…`, pos `fa07a14844314772…`, neg `6a43e5800ef2354f…`. No NC restriction on the model card. Both checkpoints are plain state dicts (DiT 635 keys, VAE 250 keys) — no EMA wrapper; load under torch's default `weights_only=True` | Cloned ByteDance-Seed/SeedVR; HF API + `huggingface_hub.snapshot_download`; SHA-256 of the downloaded files. Phase B code (runner + vendored arch + manifest wiring) complete 2026-10-19, CPU tests green; GPU verification pending |

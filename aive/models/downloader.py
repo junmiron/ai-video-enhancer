@@ -68,27 +68,58 @@ def _is_transient(exc: Exception) -> bool:
 def _fetch_one(name: str, direct_url: str, part: Path, progress_cb, expected_sha: str | None) -> str:
     """Download one URL to `part`; returns the SHA-256 hex digest.
 
+    Resumes an existing partial file when a manifest checksum is known and the
+    server honors HTTP Range (HuggingFace does) — important for multi-GB weights;
+    without a known checksum a stale partial could mask corruption, so it restarts.
     Raises DownloadError on network failure (partial file removed) or when the
     digest does not match `expected_sha` (when given).
     """
-    req = urllib.request.Request(direct_url, headers={"User-Agent": "Mozilla/5.0 (aive model downloader)"})
-    log.info("Downloading %s from %s", name, direct_url)
+    headers = {"User-Agent": "Mozilla/5.0 (aive model downloader)"}
     h = hashlib.sha256()
-    total: int | None = None
-    done = 0
-    try:
-        with urllib.request.urlopen(req, timeout=120) as resp, open(part, "wb") as f:
-            total_hdr = resp.headers.get("Content-Length")
-            total = int(total_hdr) if total_hdr else None
-            while True:
-                chunk = resp.read(1 << 20)
-                if not chunk:
-                    break
-                f.write(chunk)
+    resume_pos = 0
+    if expected_sha is not None and part.exists():
+        # Hash the existing partial so the final digest covers the whole file.
+        with open(part, "rb") as f:
+            for chunk in iter(lambda: f.read(1 << 24), b""):
                 h.update(chunk)
-                done += len(chunk)
-                if progress_cb is not None and (total or done > 0):
-                    progress_cb(done, total or -1)
+        resume_pos = part.stat().st_size
+        if resume_pos > 0:
+            headers["Range"] = f"bytes={resume_pos}-"
+    req = urllib.request.Request(direct_url, headers=headers)
+    log.info(
+        "Downloading %s from %s%s",
+        name, direct_url,
+        f" (resuming at {resume_pos >> 20} MiB)" if resume_pos else "",
+    )
+    total: int | None = None
+    done = resume_pos
+    try:
+        with urllib.request.urlopen(req, timeout=120) as resp:
+            status = getattr(resp, "status", 200) or 200
+            resumed = resume_pos > 0 and status == 206
+            if not resumed:
+                h = hashlib.sha256()
+                resume_pos = 0
+                done = 0
+            cr_hdr = resp.headers.get("Content-Range")
+            cl_hdr = resp.headers.get("Content-Length")
+            if cr_hdr and "/" in cr_hdr:
+                tail = cr_hdr.split("/")[-1]
+                total = int(tail) if tail.isdigit() else None
+            elif resumed and cl_hdr:
+                total = resume_pos + int(cl_hdr)
+            elif cl_hdr:
+                total = int(cl_hdr)
+            with open(part, "ab" if resumed else "wb") as f:
+                while True:
+                    chunk = resp.read(1 << 20)
+                    if not chunk:
+                        break
+                    f.write(chunk)
+                    h.update(chunk)
+                    done += len(chunk)
+                    if progress_cb is not None and (total or done > 0):
+                        progress_cb(done, total or -1)
     except Exception as exc:
         part.unlink(missing_ok=True)
         raise DownloadError(f"Download failed for {name}: {exc}") from exc
@@ -142,7 +173,7 @@ def download_model(
     """Download (or return cached) weights for `info`. Returns the local path."""
     from ..config import model_cache_dir
 
-    if not info.urls and not info.bundled:
+    if not info.urls and not info.bundled and not info.files:
         raise DownloadError(
             f"{info.name}: no download URLs configured "
             "(experimental model; adapter work pending)"
@@ -151,6 +182,8 @@ def download_model(
     base = Path(dest_dir) if dest_dir else model_cache_dir() / info.name / info.version
     base.mkdir(parents=True, exist_ok=True)
 
+    if info.files:
+        return _download_files(info, base, progress_cb)
     if info.bundled:
         return _resolve_bundled(info, base)
 
@@ -258,6 +291,60 @@ def _maybe_extract(
     return out_path
 
 
+def _download_files(info: ModelInfo, base: Path, progress_cb=None) -> Path:
+    """Download every configured file into `base` (sha256-verified); returns `base`.
+
+    Multi-file models (e.g. SeedVR2's DiT + VAE + text embeddings): each manifest
+    entry is {url, sha256, name}. Existing files are verified against their pin;
+    missing ones are downloaded with resume support and retried like the
+    single-file path.
+    """
+    verified_file = base / "verified.json"
+    verified: dict = {}
+    if verified_file.exists():
+        try:
+            verified = json.loads(verified_file.read_text(encoding="utf-8"))
+        except json.JSONDecodeError:
+            verified = {}
+
+    changed = False
+    for entry in info.files:
+        fname = entry["name"]
+        url = entry["url"]
+        expected = (entry.get("sha256") or "").lower() or None
+        target = base / fname
+        if target.exists():
+            if expected is None or _sha256_file(target) == expected:
+                log.info("Model file cached: %s", target)
+                continue
+            raise DownloadError(f"Cache hash mismatch for {target}; delete it and re-download.")
+        part = target.with_suffix(fname + ".part")
+        digest: str | None = None
+        last_err: Exception | None = None
+        for attempt in range(1, _MAX_ATTEMPTS + 1):
+            try:
+                digest = _fetch_one(info.name, url, part, progress_cb, expected)
+                break
+            except DownloadError as exc:
+                last_err = exc
+                log.warning(
+                    "Download attempt %d/%d for %s (%s) failed: %s",
+                    attempt, _MAX_ATTEMPTS, info.name, fname, str(exc)[:300],
+                )
+                if not _is_transient(exc) or attempt == _MAX_ATTEMPTS:
+                    break
+                time.sleep(_RETRY_BACKOFF_S * attempt)
+        if digest is None:
+            raise DownloadError(f"Download failed for {info.name}/{fname}: {last_err}")
+        part.replace(target)
+        verified[fname] = digest
+        changed = True
+    if changed:
+        verified_file.write_text(json.dumps(verified, indent=1), encoding="utf-8")
+    log.info("Model files ready in %s", base)
+    return base
+
+
 def cached_weights_path(info: ModelInfo, dest_dir: str | Path | None = None) -> Path | None:
     """Local path of already-downloaded weights for `info`, or ``None`` if not cached.
 
@@ -272,6 +359,22 @@ def cached_weights_path(info: ModelInfo, dest_dir: str | Path | None = None) -> 
         target = base / Path(info.bundled).name
         expected = (info.sha256 or "").lower() or None
         return target if (target.exists() and (expected is None or _sha256_file(target) == expected)) else None
+    if info.files:
+        # Fast path for the UI: existence + download-time verification record.
+        # (No re-hashing here — multi-GB weights make per-refresh digests painful;
+        # download_model still verifies fully at job start.)
+        verified_file = base / "verified.json"
+        verified: dict = {}
+        if verified_file.exists():
+            try:
+                verified = json.loads(verified_file.read_text(encoding="utf-8"))
+            except json.JSONDecodeError:
+                verified = {}
+        for entry in info.files:
+            target = base / entry["name"]
+            if not target.exists() or entry["name"] not in verified:
+                return None
+        return base
     if not info.urls:
         return None  # experimental model without a configured URL
     url = info.urls[0]

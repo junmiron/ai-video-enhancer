@@ -156,6 +156,7 @@ the UI tooltips. Full audit with verification dates: [docs/licenses.md](licenses
 | Cyte V1 SuperUltraCompact | arch Apache-2.0; **weights CC BY-NC 4.0 ⚠️** | TRT + CUDA | Ultra-light (fastest of the lineup). |
 | OpenProteus Compact i2 | arch Apache-2.0; weights personal use | TRT + CUDA | Good speed/quality balance. |
 | Real-ESRGAN x4plus | code BSD-3; **weights non-commercial ⚠️** | TRT + CUDA | Live-action default (x4 model, run at 2×). Battle-tested SR+denoise. |
+| SeedVR2-3B *(experimental)* | Apache-2.0 (ByteDance) | CUDA only | One-step diffusion video restoration transformer — runs temporal clips through a Video-VAE + NaDiT denoise with wavelet color-fix blending onto the input frames. Highest quality/detail but heavy (~14 GB weights across 4 files, ≥12 GiB free VRAM; slowest of the lineup). See [docs/seedvr2.md](seedvr2.md) for how it works and its status. |
 
 **Frame interpolation**
 

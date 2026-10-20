@@ -116,6 +116,12 @@ def run_depth_pass(
 
         sr_name = cfg.sr_model or "shufflecugan_x2"
         sr_info = get_model(sr_name, task="sr")
+        if sr_info.kind == "clip":
+            raise RuntimeError(
+                f"Depth post-upscale needs a per-frame SR model, but '{sr_name}' is a "
+                "temporal (clip) diffusion model. Pick a per-frame model for the pipeline "
+                "SR stage or disable depth post-upscale."
+            )
         weights = download_model(sr_info)
         native_scale = sr_spec_for(sr_name).scale
         target_scale = cfg.sr_scale or native_scale

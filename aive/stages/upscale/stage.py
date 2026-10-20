@@ -282,13 +282,28 @@ class UpscaleStage:
 
     name = "upscale"
 
+    #: Clip (temporal diffusion) SR models have no fixed native scale; this is
+    #: the default target when the user leaves the scale unset.
+    CLIP_DEFAULT_SCALE = 4
+
     def __init__(self, cfg: UpscaleConfig):
         self.cfg = cfg
         # One runner per input resolution. Cascading (target a multiple of the
         # model's native scale) needs a chain of runners at increasing sizes;
         # they're built once and reused across all segments/frames of a job.
         self._runners: dict[tuple[int, int], SRRunner] = {}
+        # Clip models (SeedVR2): one runner per (input size, scale) — it is
+        # resolution-bound like the per-frame runners.
+        self._clip_runners: dict[tuple[int, int, int], object] = {}
         self.frames_processed = 0
+
+    def _info(self):
+        """Manifest entry for the configured model (cached; raises if unknown)."""
+        from ...models.registry import get_model
+
+        if not hasattr(self, "_model_info"):
+            self._model_info = get_model(self.cfg.model, task="sr")
+        return self._model_info
 
     def _get_runner(self, weights: str | Path, width: int, height: int) -> SRRunner:
         """Build (or fetch from cache) a runner sized for one pass's input dims."""
@@ -299,23 +314,71 @@ class UpscaleStage:
             self._runners[key] = runner
         return runner
 
+    def _process_clip_sr(self, frames: Iterator[np.ndarray], ctx, info) -> Iterator[np.ndarray]:
+        """Temporal diffusion SR (SeedVR2): buffer the segment's frames and run
+        windowed clips through :class:`aive.stages.upscale._seedvr.runner.SeedVrRunner`.
+
+        Clip models see whole temporal windows, so — unlike the per-frame path —
+        the segment is buffered first (source-resolution frames: small), then
+        processed in one go; output frames are yielded lazily afterwards.
+        """
+        from ...models.downloader import download_model
+        from ._seedvr.runner import SeedVrRunner
+
+        scale = self.cfg.scale or self.CLIP_DEFAULT_SCALE
+        out_w, out_h = ctx.width * scale, ctx.height * scale
+
+        key = (ctx.width, ctx.height, scale)
+        runner = self._clip_runners.get(key)
+        if runner is None:
+            weights_dir = download_model(info)  # multi-file models return the cache dir
+            log.info(
+                "Upscaling: %s @ %dx%d (target x%s) - temporal clip SR",
+                info.name, ctx.width, ctx.height, scale,
+            )
+            runner = SeedVrRunner(weights_dir, ctx.width, ctx.height, scale=scale)
+            runner.load()  # VRAM-heavy; once per resolution/scale
+            self._clip_runners[key] = runner
+
+        ctl = getattr(ctx, "control", None)
+        buf: list[np.ndarray] = []
+        for frame in frames:
+            check_control(ctl)  # M6: pause/cancel takes effect within one frame
+            buf.append(frame)
+
+        out_frames = runner(buf)
+        need_resize = (runner.out_h, runner.out_w) != (out_h, out_w)
+        if need_resize:
+            import cv2
+
+            log.info("SeedVR output %dx%d -> LANCZOS to exact target %dx%d", runner.out_w, runner.out_h, out_w, out_h)
+        for f in out_frames:
+            if need_resize:
+                f = cv2.resize(f, (out_w, out_h), interpolation=cv2.INTER_LANCZOS4)
+            self.frames_processed += 1
+            check_control(ctl)
+            yield f
+
     # -- stage interface ------------------------------------------------------
 
     def output_dims(self, ctx) -> tuple[int, int]:
         """Output (width, height) for a context with the given input dims."""
         if not self.cfg.enabled:
             return (ctx.width, ctx.height)
-        spec = spec_for(self.cfg.model)
-        scale = self.cfg.scale or spec.scale
+        info = self._info()
+        default_scale = self.CLIP_DEFAULT_SCALE if info.kind == "clip" else spec_for(info.name).scale
+        scale = self.cfg.scale or default_scale
         return (ctx.width * scale, ctx.height * scale)
 
     def process(self, frames: Iterator[np.ndarray], ctx) -> Iterator[np.ndarray]:
         import torch  # noqa: F401 - ensure CUDA context is up before first model use
 
-        from ...models.downloader import download_model
-        from ...models.registry import get_model
+        info = self._info()
+        if info.kind == "clip":
+            yield from self._process_clip_sr(frames, ctx, info)
+            return
 
-        native_scale = spec_for(self.cfg.model).scale
+        native_scale = spec_for(info.name).scale
         target_scale = self.cfg.scale or native_scale
 
         # Cascade (Option A): when the requested scale is an exact integer power
@@ -327,7 +390,8 @@ class UpscaleStage:
         out_w, out_h = ctx.width * target_scale, ctx.height * target_scale
 
         if not self._runners:
-            info = get_model(self.cfg.model, task="sr")
+            from ...models.downloader import download_model
+
             weights = download_model(info)
             n = passes or 1
             if passes is not None and passes > 1:

@@ -24,6 +24,12 @@ dependencies = [
     "einops",
     "timm",
     "safetensors",
+    # SeedVR2 video diffusion upscaler (experimental): temporal NaDiT + Video-VAE-v3
+    # vendored under aive/stages/upscale/_seedvr/vendor/. Verified importable with
+    # torch 2.12 + diffusers 0.33.1.
+    "omegaconf",
+    "diffusers>=0.33,<0.34",
+    "rotary-embedding-torch==0.5.3",
 ]
 
 [project.optional-dependencies]

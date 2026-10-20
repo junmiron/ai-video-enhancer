@@ -13,6 +13,7 @@ artifact report. Personal-use Windows app for NVIDIA GPUs (CUDA + TensorRT).
 | [docs/design.md](<docs/design.md>) | Product design, architecture, model selection, artifact system, UI/UX |
 | [docs/plan.md](<docs/plan.md>) | Phased implementation plan with milestones and acceptance criteria (progress log at the bottom) |
 | [docs/licenses.md](<docs/licenses.md>) | License audit: per-model weight/arch tables + verification dates |
+| [docs/seedvr2.md](<docs/seedvr2.md>) | SeedVR2 diffusion video upscaler — how it works and its current status (experimental) |
 | [docs/benchmarks.md](<docs/benchmarks.md>) | Measured throughput tables (auto-updated snapshot + per-milestone findings); re-run with `python tools/bench_all.py` |
 | [packaging/BUILD.md](<packaging/BUILD.md>) | How to build the Windows package, installer and release ZIP (`powershell -File packaging\build.ps1`) |
 
@@ -31,6 +32,12 @@ output on top.
   PyTorch-CUDA fallback, automatic tiled mode as a VRAM safety valve. Integer-power
   targets beyond a model's native scale (e.g. ×4 on an ×2 model) are reached by
   **cascading AI passes** — no plain resampling in between.
+- **Experimental diffusion video upscaler**: SeedVR2-3B (ByteDance, Apache-2.0) —
+  a one-step diffusion restoration transformer that runs the whole temporal clip
+  through a Video-VAE + NaDiT denoise with wavelet color-fix blending onto the
+  input frames. CUDA-only (no TensorRT path); ~14 GB weights across 4 files,
+  ≥12 GiB free VRAM; GPU-verified on first-run tests. See
+  [docs/seedvr2.md](<docs/seedvr2.md>) for how it works and its status.
 - **Frame interpolation**: RIFE 4.25 family (Lite/Balanced/Heavy), GMFSS, M2M and
   AMT-S / AMT-L (CVPR'23) — scene-cut protection, de-duplication of held frames,
   any multiplier (target-FPS or fixed ×).
